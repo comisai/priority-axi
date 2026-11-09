@@ -34,7 +34,7 @@ Updated 2026-11-05 from `test/live/reports/2026-11-05T15-25-19-726Z.json` (the l
 | Query semantics (Q1–Q3, Q8) | **Done 2026-11-08** | S9: no `$count`; options inside `$expand` honoured; `contains` and `startswith` 501; no `GetMetadataFor`. Design §15 |
 | Writes | **Done 2026-11-08** | S10 created `AXILIVE01`; `priority-axi create` created `AXILIVE02`. QA requires `WTAXNUM` (design Q9). After the administrator set up document numbering, the three W2 draft orders were created (SO26000001–SO26000003, design Q12) |
 | AXI code | **M2, M3, M4 and M5 done**: every command (home, `screens`, `fields`, `get`, `show`, `changes`, `create`, `refresh`, `help`) | 198 tests, including the ten AXI principles against the built binary. Live `--strict`, `--deep` and `--write` pass on QA. |
-| Comis connector | **Bundle ready** in `comis/`: catalog entry (C1), skills (C2), wrapper (C3), the C5a template, and hardening proposals (M9). Landing in Comis waits for M6. | `test/contract/comis-bundle.test.ts`: every route the AXI uses fits the Gate entry; creates are asked of the owner, updates and deletes refused |
+| Comis connector | **Merged in Comis 2026-11-09** (`comisai/comis#3679`): the apps pack ships priority-axi 0.1.0, its read and write skills and the public-host Gate template; the catalog's owner-network `priority` entry; the AXI publisher check covers pack locks | Comis Gate tests, the `priority-orders` integration stage and the keyed `priority-plumber` row |
 
 ## 3. Workstreams
 
@@ -59,9 +59,9 @@ A milestone is done only when its gate passes. Every gate is a command or a proo
 | M4 | Creates on the fake | B | M2 | Contract tests prove one POST per create and every answer mapped (T19–T20) | **Done 2026-11-05** |
 | M5 | Write qualification on QA | C | M3, M4, W1 | S10 passes, then one `priority-axi create` succeeds; keys and transaction cost recorded (T21) | **Done 2026-11-08:** S10 created `AXILIVE01`, `priority-axi create` created `AXILIVE02` (both with `WTAXNUM` 000000018, which QA requires); 1 transaction each; W1 2 of 5 used |
 | M6 | Release 0.1.0 | B | M3, M5, Q7 | `npm view priority-axi` shows provenance; live S1–S11 pass on the published package (T22–T24) | **Done 2026-11-09:** the release workflow published `priority-axi@0.1.0` from tag `v0.1.0`. Its SLSA provenance names `comisai/priority-axi` and `release.yml`, and `npm audit signatures` verifies it. Live `--strict` passes on QA with the npm-installed package (S1–S9, S11). |
-| M7 | Comis connector, Priority Cloud and owner-network forms | D | M6 | Design §13 proofs pass; `pnpm gate` green; C1, C2, C3, C7 and C8 merged | **Bundle ready** (`comis/README.md`); landing waits for M6 |
-| M8 | The owner's partner-hosted server in Comis | D | M7 | C5a: a manual `gate.yaml` template is documented, and the owner reads and creates through it | **Template ready** (`comis/templates/priority.yaml`); one open question for Comis maintainers |
-| M9 | Hardening | E | M8 | C4, C6, C2b and C5b each have a decision record and passing proofs | Proposals written (`comis/hardening.md`); decision records are Comis work |
+| M7 | Comis connector, Priority Cloud and owner-network forms | D | M6 | Design §13 proofs pass; `pnpm gate` green; C1, C2, C3, C7 and C8 merged | **Done 2026-11-09** (`comisai/comis#3679`): owner-network form, skills, pack and proofs; the keyed plumber row passed on the real model under gVisor. Priority Cloud's fixed hosts remain a later form |
+| M8 | The owner's partner-hosted server in Comis | D | M7 | C5a: a manual `gate.yaml` template is documented, and the owner reads and creates through it | **Template in Comis** (`images/packs/apps/templates/priority.yaml`); storing a hand-written service's secret still needs a Comis command (D3679) |
+| M9 | Hardening | E | M8 | C4, C6, C2b and C5b each have a decision record and passing proofs | Proposals moved to Comis (`docs/research/Priority Connector Proposals for Comis v2.md`); decision records are Comis work |
 
 `M8` is on the critical path for the owner. Design §5 explains why: `comis connect` cannot reach a partner-hosted public address today, so the owner's first Comis use goes through the C5a template.
 
@@ -150,7 +150,7 @@ The administrator can check the result with `node --env-file=test/live/.env.qa t
 | W1 | Allow live creates on QA? Which screen and how many? | **Decided 2026-11-05: yes, up to 5 `CUSTOMERS` records in `a150125`** | M5 | Owner |
 | W2 | Allow live draft sales orders on QA for the plumber workflow? | **Decided 2026-11-08: yes, up to 3 draft `ORDERS` in `a150125`, 1–2 lines each, for the customer the scenario resolves; each marked as an API test in DETAILS and its remarks; sent once.** Used 3 of 3 on 2026-11-08: SO26000001–SO26000003, all drafts | Plumber orders | Owner |
 | Q7 | Who owns the npm package and the GitHub repository? | **Repository decided 2026-11-09: `comisai/priority-axi` is public, open to contributors, with a protected `main`. It starts from a fresh history; the earlier history stays in a private archive.** npm: 0.1.0 published 2026-11-09 from GitHub Actions with provenance (M6 done). Next: replace the token with npm trusted publishing (OIDC) before the next release; npm ends direct publishing with 2FA-bypass tokens around January 2027. M7 and M8 wait for the owner. | M6 | Owner |
-| M7-start | Start the Comis repository work before the package exists? | **Decided 2026-11-05, reconfirmed 2026-11-08: not yet.** The bundle stays in `comis/` until M6. | M7 | Owner |
+| M7-start | Start the Comis repository work before the package exists? | **Decided 2026-11-05: not yet; 2026-11-09: yes.** The bundle moved into Comis (`comisai/comis#3679`) once 0.1.0 was on npm. | M7 | Owner |
 | Q6 | Where do the username and company live? | In memory for v1; in the connection (C2b) when a second company or user appears | M7 | Owner and Comis maintainers |
 | N1 | Error-message language | Server default (Hebrew). `tabula.ini,3` breaks the Gate's named segment, and the AXI matches both languages. | M2 | Developer (decided) |
 | N2 | Accept a full service root in `PRIORITY_URL`? | Yes. Done in the live test; F11 in the implementation plan. | M2 | Developer (decided) |
@@ -218,5 +218,4 @@ Run these in order. Each is one command.
 | `docs/priority-axi-master-plan.md` | When and who: milestones, gates, schedule, decisions, risks |
 | `test/live/priority-live.mjs` | The live test: read-only by default, no dependencies |
 | `test/fake/priority-fake.ts` | Fake Priority: records, `$filter`, deep insert, Gate hold and reconnect; used by contract tests and to check the live test offline |
-| `comis/` | Comis connector bundle (C1, C2, C3, C5a) and M9 proposals |
 | `test/live/reports/*.json` | Reports from each run (gitignored) |

@@ -151,10 +151,11 @@ Records that are not in use are left out unless you pass `--all`. When no record
 
 ## Comis
 
-[`comis/`](comis/README.md) holds the Comis connector bundle:
-- the catalog entry and the Gate template;
-- the wrapper;
-- the agent skills, including one that turns a plumber's Hebrew order message into a draft sales order.
+Comis ships priority-axi in its optional apps pack:
+- a read skill, and a write skill that turns a plumber's Hebrew order message into a draft sales order for the owner's approval;
+- a Gate catalog entry that injects the password only on the routes priority-axi uses, with a template for a server on a public host.
+
+That integration lives in the Comis repository.
 
 ## Development
 
