@@ -1,0 +1,13 @@
+priority-axi
+Copyright (c) 2026 priority-axi contributors
+Licensed under the MIT License; see LICENSE.
+
+This package depends on the following third-party software at run time.
+
+@toon-format/toon 4.4.0
+  https://github.com/toon-format/toon
+  Copyright (c) 2025-PRESENT Johann Schopplich
+  MIT License
+
+Priority is a trademark of Priority Software Ltd. priority-axi is not made,
+endorsed or supported by Priority Software Ltd.

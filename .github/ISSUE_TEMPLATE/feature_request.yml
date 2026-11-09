@@ -1,0 +1,21 @@
+name: Feature request
+description: A new command, flag or behaviour.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What you need
+      description: The task you are trying to do, and why the current commands do not cover it.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: The command, flags and output you have in mind, if any.
+  - type: textarea
+    id: priority
+    attributes:
+      label: Priority details
+      description: Screens, fields or REST API behaviour involved, with links to Priority's documentation if relevant.

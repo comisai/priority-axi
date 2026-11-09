@@ -1,0 +1,57 @@
+{
+  "name": "priority-axi",
+  "version": "0.0.0",
+  "description": "A command-line tool that lets AI agents read and create Priority ERP records through the REST API",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "priority-axi": "dist/bin/priority-axi.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/comisai/priority-axi.git"
+  },
+  "homepage": "https://github.com/comisai/priority-axi#readme",
+  "bugs": {
+    "url": "https://github.com/comisai/priority-axi/issues"
+  },
+  "keywords": [
+    "priority",
+    "priority-erp",
+    "erp",
+    "odata",
+    "rest",
+    "cli",
+    "ai-agents",
+    "axi",
+    "toon"
+  ],
+  "scripts": {
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.build.json && node scripts/chmod-bin.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "test": "node --test \"test/unit/**/*.test.ts\" \"test/contract/**/*.test.ts\" \"test/axi/**/*.test.ts\"",
+    "check": "npm run typecheck && npm run lint && npm test",
+    "live": "node test/live/priority-live.mjs",
+    "test:dist": "PRIORITY_AXI_BIN=dist node --test \"test/contract/binary.test.ts\" \"test/axi/**/*.test.ts\"",
+    "check:package": "node scripts/check-package.mjs",
+    "prepublishOnly": "npm run check && npm run build && npm run test:dist && node scripts/check-package.mjs"
+  },
+  "dependencies": {
+    "@toon-format/toon": "4.4.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "22.20.5",
+    "typescript": "7.0.2"
+  }
+}
