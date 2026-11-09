@@ -1,6 +1,6 @@
 # Comis connector bundle (M7, M8)
 
-This folder holds everything the Comis repository needs to connect Priority through `priority-axi`. It lives here, and is tested here against the real AXI, until `priority-axi` is published to npm (M6). The Comis changes cannot land before that: a pack installs AXIs only from its npm lock, with provenance checked (D335).
+This folder holds everything the Comis repository needs to connect Priority through `priority-axi`. It lives here, and is tested here against the real AXI, until it lands in Comis (M7). `priority-axi` 0.1.0 is on npm with provenance (M6), as a pack requires: a pack installs AXIs only from its npm lock, with provenance checked (D335).
 
 | File | Comis change | Goes to, in the Comis repository |
 | --- | --- | --- |
@@ -29,7 +29,7 @@ This folder holds everything the Comis repository needs to connect Priority thro
 
 The matcher in that test follows the Gate rules as the design records them: paths only, `{name}` matches `[A-Za-z0-9._~-]+`, and `{A|B}` matches one listed literal. The Comis proofs (C7) must still run the real Gate.
 
-## Landing it in Comis (after M6)
+## Landing it in Comis (M7)
 
 1. **C3: the pack and the provenance check.**
    - Add `"priority-axi": "<version>"` to `images/packs/apps/package.json` and refresh its lock.

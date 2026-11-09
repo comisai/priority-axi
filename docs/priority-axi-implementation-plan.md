@@ -200,7 +200,7 @@ The size is in working days for one developer. "Live" says whether the task need
 | T18 live S11 | Done | Passes on QA: the shipped binary runs end to end and maps `screen_not_enabled` |
 | T19, T20 `create` | Done | `--set`, `--line <SUB> F=V`, `--json-file`, `--dry-run`, type and length checks, sent once, every answer mapped |
 | T22 docs and help | Done 2026-11-06 | README rewritten: administrator setup, examples (run against the fake), error codes, writes, license. `--help` reviewed: a required flag shows without brackets (`changes --since`), `create --line <SUB> <F=V>...`, the 500 and 2000 caps stated, and the create hint no longer claims an approval outside Comis. `LICENSE` (MIT) and `NOTICE` (TOON attribution, Priority trademark) ship in the package, enforced by `check-package`. Recheck the wording after T17. |
-| T23 release | Prepared | `.github/workflows/release.yml` (tag, provenance, refuses a private repository); `scripts/check-package.mjs` in CI |
+| T23 release | Done 2026-11-09 | `.github/workflows/release.yml` (tag, provenance, refuses a private repository) published 0.1.0 from the `npm` environment, which only `v*` tags can use; `scripts/check-package.mjs` in CI |
 | T16 live sweep and strict | Done 2026-11-08 | The administrator enabled CUSTOMERS, SUPPLIERS, LOGPART, ORDERS, CINVOICES, CURRENCIES, plus PORDERS and FMEC_PRDISINGLE. `--sweep`: 8 of 1,328 enabled. `--strict`: 10 pass, 0 fail, 1 skip (S10), on CUSTOMERS and again on CINVOICES. Reports in `test/live/reports/` (not committed). |
 | T17 act on Q1–Q3, Q8 | Done 2026-11-08 | Design §15. "More exist" stays (no `$count`). `--with` caps lines on the server. `~` refused before sending. Full metadata stays (no `GetMetadataFor`). Also: cut-off and broken-off answers are mapped, Priority's form errors (`InterfaceErrors`) are read, and S9/S11 handle compound keys. |
 | T21 live creates | Done 2026-11-08 | The first two attempts were refused with 400 because QA requires `WTAXNUM` (design Q9); no record was made. The owner chose the placeholder `000000018` (it passes the Israeli check digit). Then S10 created `AXILIVE01` (201), and `priority-axi create` created `AXILIVE02`. Both were read back with `get` and `show`. Cost: 1 API transaction per record by the AXI's estimate, since Priority reports no counter; the 2 refused POSTs made no record. W1: 2 of 5 records used. Priority copies `WTAXNUM` into `VATNUM`. |
@@ -241,7 +241,7 @@ The size is in working days for one developer. "Live" says whether the task need
 - SO26000003: a third project, chosen after the plumber's first site was cancelled, one item line (2 pipes).
 
 W2: 3 of 3 used. Priority stores the remarks as HTML; `show` and `get --with` now print a remarks sub-screen's TEXT as plain text, and live S12 checks it. Live `--strict --deep` on ORDERS, CUSTOMERS, LOGPART and DOCUMENTS_p: 12 stages pass, 217 AXI runs, 14 remarks sub-screens read as plain text. One read of DOCUMENTS_p > CUSTOBLIGO got Priority's own `Status(StatusCode="Unknown", Detail="EOF")` (mapped to `priority_error`); the same read passed right after. |
-| T24 | Waiting | Publishing to npm (Q7). The repository is public since 2026-11-09. |
+| T24 | Done 2026-11-09 | `priority-axi@0.1.0` is on npm with verified provenance. Live `--strict` passes on QA with the npm-installed package. |
 
 **Test results:** 198 tests (unit, contract and AXI principles), all passing, plus one opt-in golden test. CI also runs the contract and principles tests against the built `dist`. Type-check and lint are clean.
 
