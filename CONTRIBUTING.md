@@ -26,23 +26,23 @@ npm run test:dist   # contract and AXI-principle tests against the built CLI
 
 ## Project layout
 
-| Path | What it holds |
-| --- | --- |
-| `src/cli/` | Argument parsing and the command table |
-| `src/commands/` | One module per command: `get`, `show`, `changes`, `find`, `create` and the others |
-| `src/index/` | The screen index built from Priority's metadata, the cache, and `find`'s local catalog |
-| `src/output/` | TOON rendering, size bounds, text safety and row shaping |
-| `src/http.ts`, `src/odata.ts`, `src/errors.ts` | Requests, OData query building, and the error codes |
-| `test/unit/`, `test/contract/` | Unit tests, and end-to-end tests of the CLI against a fake Priority |
-| `test/axi/` | The ten AXI principles, checked against the CLI |
-| `test/fake/` | The fake Priority server the tests use |
-| `test/live/` | Opt-in checks against a real Priority server |
-| `comis/` | The Comis connector bundle: catalog entry, Gate template, skills and wrapper |
-| `docs/` | Design and plans |
+| Path                                           | What it holds                                                                          |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `src/cli/`                                     | Argument parsing and the command table                                                 |
+| `src/commands/`                                | One module per command: `get`, `show`, `changes`, `find`, `create` and the others      |
+| `src/index/`                                   | The screen index built from Priority's metadata, the cache, and `find`'s local catalog |
+| `src/output/`                                  | TOON rendering, size bounds, text safety and row shaping                               |
+| `src/http.ts`, `src/odata.ts`, `src/errors.ts` | Requests, OData query building, and the error codes                                    |
+| `test/unit/`, `test/contract/`                 | Unit tests, and end-to-end tests of the CLI against a fake Priority                    |
+| `test/axi/`                                    | The ten AXI principles, checked against the CLI                                        |
+| `test/fake/`                                   | The fake Priority server the tests use                                                 |
+| `test/live/`                                   | Opt-in checks against a real Priority server                                           |
+| `docs/`                                        | Design and plans                                                                       |
 
 ## What a good change looks like
 
 priority-axi is used by AI agents, so its output is part of its interface. Keep to these rules; `test/axi/principles.test.ts` checks most of them:
+
 - **Output:** results go to stdout as TOON, starting with a summary line. Output stays within the size limits unless `--full` is given.
 - **Hints:** each hint is one line that starts with ``Run `priority-axi …` ``.
 - **Errors:** an error prints `message`, `code` and `usage` on stdout. The exit code is 1 for an error and 2 for a usage error. Reuse an existing code before adding a new one.
@@ -52,11 +52,12 @@ priority-axi is used by AI agents, so its output is part of its interface. Keep 
 - **Dependencies:** the only runtime dependency is `@toon-format/toon`, pinned exactly. Discuss any new dependency in an issue first.
 - **Wording:** messages, help and docs use short, plain English sentences.
 
-Add or update tests with every change. Extend `test/fake/priority-fake.ts` when the fake needs to model new server behaviour, and write down in the pull request what the real server does. When behaviour changes, update the README, the `--help` text and, if needed, the Comis skills in `comis/skills/`.
+Add or update tests with every change. Extend `test/fake/priority-fake.ts` when the fake needs to model new server behaviour, and write down in the pull request what the real server does. When behaviour changes, update the README and the `--help` text, and tell the Comis maintainers when the skills in Comis's apps pack need the change.
 
 ## Live tests
 
 `test/live/priority-live.mjs` runs read-only checks against a real Priority server. Run it with `--help` to see its options. It needs your own server and API user:
+
 - **Credentials:** put `PRIORITY_URL`, `PRIORITY_COMPANY`, `PRIORITY_USER` and `PRIORITY_PASSWORD` in a local env file, such as `test/live/.env.local`, and run `node --env-file=test/live/.env.local test/live/priority-live.mjs`. Git ignores `.env*` files; never commit credentials.
 - **Writes:** the live tests write only with `--write` and `PRIORITY_LIVE_WRITES=1`. Each create uses a paid API transaction, so write only to a test company you are allowed to change.
 - **Reports:** reports in `test/live/reports/` stay local and are not committed.

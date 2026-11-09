@@ -1,11 +1,13 @@
 # priority-axi
 
 [![CI](https://github.com/comisai/priority-axi/actions/workflows/ci.yml/badge.svg)](https://github.com/comisai/priority-axi/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/priority-axi.svg)](https://www.npmjs.com/package/priority-axi)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A command-line tool that lets AI agents read and create records in Priority ERP through its REST API (OData).
 
 priority-axi is an AXI, an agent experience interface. Every command:
+
 - prints compact [TOON](https://github.com/toon-format/toon) text on stdout, bounded in size;
 - checks its input against the server's own metadata, and says exactly what is wrong;
 - ends with hints for the next command;
@@ -13,7 +15,7 @@ priority-axi is an AXI, an agent experience interface. Every command:
 
 It was built to run inside Comis, behind the Comis Gate, and it works just as well on its own.
 
-> **Status:** early development (0.x). Reads and creates are tested end to end against Priority 23.1. The package is not on npm yet, so install it from source.
+> **Status:** early development (0.x). Reads and creates are tested end to end against Priority 23.1.
 
 ## Requirements
 
@@ -23,28 +25,27 @@ It was built to run inside Comis, behind the Comis Gate, and it works just as we
 ## Install
 
 ```sh
-git clone https://github.com/comisai/priority-axi.git
-cd priority-axi
-npm ci
-npm run build
-npm link        # puts priority-axi on your PATH
+npm install -g priority-axi
 ```
+
+Each release is published from GitHub Actions with [npm provenance](https://docs.npmjs.com/generating-provenance-statements), so you can check that it was built from this repository. To run from source instead, see [Development](#development).
 
 ## Configure
 
-| Variable | Flag | Meaning |
-| --- | --- | --- |
-| `PRIORITY_URL` | | `https://host`, or the full service root `https://host/odata/Priority/<ini>/<company>` |
-| `PRIORITY_USER` | `--user` | The API username |
-| `PRIORITY_PASSWORD` | | The password. Inside Comis it is a placeholder that the Gate replaces. |
-| `PRIORITY_COMPANY` | `--company` | The company code |
-| `PRIORITY_INI` | `--ini` | The ini file in the URL. The default is `tabula.ini`. |
+| Variable            | Flag        | Meaning                                                                                |
+| ------------------- | ----------- | -------------------------------------------------------------------------------------- |
+| `PRIORITY_URL`      |             | `https://host`, or the full service root `https://host/odata/Priority/<ini>/<company>` |
+| `PRIORITY_USER`     | `--user`    | The API username                                                                       |
+| `PRIORITY_PASSWORD` |             | The password. Inside Comis it is a placeholder that the Gate replaces.                 |
+| `PRIORITY_COMPANY`  | `--company` | The company code                                                                       |
+| `PRIORITY_INI`      | `--ini`     | The ini file in the URL. The default is `tabula.ini`.                                  |
 
 A flag overrides its variable. Plain `http://` is accepted only for `localhost` and `127.0.0.1`.
 
 ### Priority administrator setup
 
 The REST API reads only the screens that the administrator has opened to it. Ask them to:
+
 1. Add the screens you need to **Limited Access / API Forms**, for example CUSTOMERS, LOGPART and ORDERS. Their sub-screens, such as ORDERITEMS, come with them.
 2. Give the API user an API license, and only the privileges it needs.
 
@@ -112,6 +113,7 @@ Always filter large document screens such as orders and invoices. Without a filt
 ### Finding records by words
 
 Priority cannot search inside text, so `find` keeps a local copy of a screen's catalog, refreshed daily: the key, description, unit, family and status. It matches as follows:
+
 - **Every word must appear.** A word matches the start of a word, after Hebrew prefix letters, so `ביוב` finds `לביוב`.
 - **Numbers match only as whole numbers.** `4` matches neither `4000` nor `SN4`.
 - **Spelling variants are ignored:** Hebrew points, final letter forms, and `״`/`׳` against `"`/`'`.
@@ -126,36 +128,39 @@ Records that are not in use are left out unless you pass `--all`. When no record
 - **Errors** print `message`, `code` and `usage` on stdout.
 - **Exit codes:** 0 on success, 1 on an error, 2 on a usage error.
 
-| Code | Meaning |
-| --- | --- |
-| `usage` | The command line is wrong; `usage` shows the right form |
-| `not_connected`, `missing_setting` | A setting is missing |
-| `auth_failed` | Priority refused the username or password |
-| `company_not_found` | The API user cannot reach that company |
-| `screen_not_enabled` | The screen is not in Limited Access / API Forms |
-| `not_found` | No record has that key |
-| `already_exists` | A create clashed with an existing key |
-| `priority_rejected` | Priority refused the request; its own message is shown |
-| `unsupported_query` | Priority cannot run that query |
-| `rate_limited` | Too many requests; wait and try again |
-| `held_for_approval`, `reconnect_needed`, `refused` | Inside Comis: the owner must approve, the owner must reconnect, or the Gate refused |
-| `unreachable`, `priority_error` | The server could not be reached, or it failed |
-| `output_too_large` | Even `--full` would exceed 256 KB; narrow the query |
-| `internal_error` | A bug in priority-axi; please [report it](https://github.com/comisai/priority-axi/issues) |
+| Code                                               | Meaning                                                                                   |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `usage`                                            | The command line is wrong; `usage` shows the right form                                   |
+| `not_connected`, `missing_setting`                 | A setting is missing                                                                      |
+| `auth_failed`                                      | Priority refused the username or password                                                 |
+| `company_not_found`                                | The API user cannot reach that company                                                    |
+| `screen_not_enabled`                               | The screen is not in Limited Access / API Forms                                           |
+| `not_found`                                        | No record has that key                                                                    |
+| `already_exists`                                   | A create clashed with an existing key                                                     |
+| `priority_rejected`                                | Priority refused the request; its own message is shown                                    |
+| `unsupported_query`                                | Priority cannot run that query                                                            |
+| `rate_limited`                                     | Too many requests; wait and try again                                                     |
+| `held_for_approval`, `reconnect_needed`, `refused` | Inside Comis: the owner must approve, the owner must reconnect, or the Gate refused       |
+| `unreachable`, `priority_error`                    | The server could not be reached, or it failed                                             |
+| `output_too_large`                                 | Even `--full` would exceed 256 KB; narrow the query                                       |
+| `internal_error`                                   | A bug in priority-axi; please [report it](https://github.com/comisai/priority-axi/issues) |
 
 ## Writes
 
 `create` checks every field against the metadata before it sends anything: the field must exist and be writable, and its value must have the right type and length.
+
 - **Dry run:** `--dry-run` shows the request and how many API transactions it will cost: one per record and one per line.
 - **Sent once:** a create is never retried. Inside Comis, the Gate holds it until the owner approves it.
 - **Fields the metadata does not mark:** Priority may require them, and then refuses with `priority_rejected` and its own message.
 
 ## Comis
 
-[`comis/`](comis/README.md) holds the Comis connector bundle:
-- the catalog entry and the Gate template;
-- the wrapper;
-- the agent skills, including one that turns a plumber's Hebrew order message into a draft sales order.
+Comis ships priority-axi in its optional apps pack:
+
+- a read skill, and a write skill that turns a plumber's Hebrew order message into a draft sales order for the owner's approval;
+- a Gate catalog entry that injects the password only on the routes priority-axi uses, with a template for a server on a public host.
+
+That integration lives in the Comis repository.
 
 ## Development
 
