@@ -4,7 +4,7 @@ priority-axi handles ERP credentials and business data, so we take security repo
 
 ## Supported versions
 
-There are no releases yet, so security fixes go to the latest commit on `main`. Once the package is published, they will go to the latest `0.x` release.
+Security fixes go to `main` and to the next `0.x` release on npm. Only the latest release is supported.
 
 ## Reporting a vulnerability
 
