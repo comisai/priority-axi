@@ -23,6 +23,7 @@ This code applies in all project spaces: issues, pull requests, discussions and 
 ## Reporting
 
 Report unacceptable behaviour to the maintainers privately:
+
 1. Open a private report from the repository's [Security tab](https://github.com/comisai/priority-axi/security/advisories/new) ("Report a vulnerability").
 2. Start its title with `Conduct:`.
 
