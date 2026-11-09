@@ -1,6 +1,7 @@
 # priority-axi
 
 [![CI](https://github.com/comisai/priority-axi/actions/workflows/ci.yml/badge.svg)](https://github.com/comisai/priority-axi/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/priority-axi.svg)](https://www.npmjs.com/package/priority-axi)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A command-line tool that lets AI agents read and create records in Priority ERP through its REST API (OData).
@@ -13,7 +14,7 @@ priority-axi is an AXI, an agent experience interface. Every command:
 
 It was built to run inside Comis, behind the Comis Gate, and it works just as well on its own.
 
-> **Status:** early development (0.x). Reads and creates are tested end to end against Priority 23.1. The package is not on npm yet, so install it from source.
+> **Status:** early development (0.x). Reads and creates are tested end to end against Priority 23.1.
 
 ## Requirements
 
@@ -23,12 +24,10 @@ It was built to run inside Comis, behind the Comis Gate, and it works just as we
 ## Install
 
 ```sh
-git clone https://github.com/comisai/priority-axi.git
-cd priority-axi
-npm ci
-npm run build
-npm link        # puts priority-axi on your PATH
+npm install -g priority-axi
 ```
+
+Each release is published from GitHub Actions with [npm provenance](https://docs.npmjs.com/generating-provenance-statements), so you can check that it was built from this repository. To run from source instead, see [Development](#development).
 
 ## Configure
 

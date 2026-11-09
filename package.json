@@ -1,6 +1,6 @@
 {
   "name": "priority-axi",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "A command-line tool that lets AI agents read and create Priority ERP records through the REST API",
   "license": "MIT",
   "type": "module",
