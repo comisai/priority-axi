@@ -76,7 +76,7 @@ export function typedValue(field: Field, raw: string, where: string): unknown {
   throw usage(`${field.name} has type ${field.type}, which create cannot set.`);
 }
 
-function assign(
+export function assign(
   type: ScreenType,
   where: string,
   target: Body,

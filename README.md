@@ -4,7 +4,7 @@
 [![npm](https://img.shields.io/npm/v/priority-axi.svg)](https://www.npmjs.com/package/priority-axi)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A command-line tool that lets AI agents read and create records in Priority ERP through its REST API (OData).
+A command-line tool that lets AI agents read, create and update records in Priority ERP through its REST API (OData).
 
 priority-axi is an AXI, an agent experience interface. Every command:
 
@@ -62,6 +62,9 @@ priority-axi show <SCREEN> <key> [--with <SUB>]...
 priority-axi changes <SCREEN> --since 7d     recent changes, on screens with a BPM status workflow
 priority-axi find <SCREEN> <words>...        records by words in their name or description
 priority-axi create <SCREEN> --set F=V... [--line <SUB> F=V...]... [--dry-run]
+priority-axi update <SCREEN> <key> --set F=V... [--dry-run]          change a record
+priority-axi add-line <SCREEN> <key> <SUB> F=V... [--dry-run]        add a line to it
+priority-axi update-line <SCREEN> <key> <SUB> <line-key> --set F=V... [--dry-run]
 priority-axi refresh                         rebuild the screen index
 priority-axi help [<command>]                every flag of a command
 ```
@@ -100,6 +103,8 @@ priority-axi show ORDERS SO26000102 --with ORDERITEMS --with ORDERSTEXT
 priority-axi changes CUSTOMERS --since 7d
 priority-axi find LOGPART צינור ביוב 110
 priority-axi create ORDERS --set CUSTNAME=C1001 --line ORDERITEMS PARTNAME=P1 TQUANT=2 --dry-run
+priority-axi add-line ORDERS SO26000102 ORDERITEMS PARTNAME=P1 TQUANT=2 --dry-run
+priority-axi update-line ORDERS SO26000102 ORDERITEMS KLINE=1 --set TQUANT=3 --dry-run
 ```
 
 ### Filters
@@ -147,10 +152,11 @@ Records that are not in use are left out unless you pass `--all`. When no record
 
 ## Writes
 
-`create` checks every field against the metadata before it sends anything: the field must exist and be writable, and its value must have the right type and length.
+`create`, `update`, `add-line` and `update-line` check every field against the metadata before they send anything: the field must exist and be writable, and its value must have the right type and length.
 
 - **Dry run:** `--dry-run` shows the request and how many API transactions it will cost: one per record and one per line.
-- **Sent once:** a create is never retried. Inside Comis, the Gate holds it until the owner approves it.
+- **Sent once:** a write is never retried. Inside Comis, the Gate holds it until the owner approves it.
+- **Updates name the record in the path:** `PATCH ORDERS('SO26000102')`, `POST ORDERS('SO26000102')/ORDERITEMS_SUBFORM` and `PATCH ORDERS('SO26000102')/ORDERITEMS_SUBFORM(KLINE=1)`. A key value is a typed literal; it may not hold a slash, a percent sign, a backslash, a control character or two dots in a row, and the record's key fields cannot be changed. Deleting is not supported.
 - **Fields the metadata does not mark:** Priority may require them, and then refuses with `priority_rejected` and its own message.
 
 ## Comis

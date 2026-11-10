@@ -130,7 +130,7 @@ describe('main', () => {
     assert.equal(v.output(), `${VERSION}\n`);
     const h = makeIo();
     assert.equal(await main(['--help'], h.io), 0);
-    assert.match(h.output(), /commands\[10\]\{command,summary\}:/);
+    assert.match(h.output(), /commands\[13\]\{command,summary\}:/);
     assert.match(
       h.output(),
       /help\[1\]:\n {2}Run `priority-axi help <command>` for its flags\n$/,
@@ -156,7 +156,7 @@ describe('main', () => {
     assert.equal(await main(['bogus'], r.io), 2);
     assert.match(
       r.output(),
-      /^message: "Unknown command `bogus`\. Commands: screens, fields, get, show, changes, find, create, refresh, help\."\ncode: usage\nusage: /,
+      /^message: "Unknown command `bogus`\. Commands: screens, fields, get, show, changes, find, create, update, add-line, update-line, refresh, help\."\ncode: usage\nusage: /,
     );
   });
 

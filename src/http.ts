@@ -34,7 +34,7 @@ export interface Answer {
 }
 
 export interface Call {
-  method: 'GET' | 'POST';
+  method: 'GET' | 'POST' | 'PATCH';
   /** Path below the service root, built from checked names only. */
   path: string;
   query?: string;
@@ -99,7 +99,9 @@ async function once(
       'unreachable',
       call.method === 'GET'
         ? 'Priority broke off its answer part way through. Try again with a smaller --limit or fewer --with sub-screens.'
-        : 'Priority broke off its answer to the create, so it may have been saved. Check with priority-axi get or show before creating it again.',
+        : call.method === 'PATCH'
+          ? 'Priority broke off its answer to the update, so it may have been applied. Check with priority-axi show before updating it again.'
+          : 'Priority broke off its answer to the create, so it may have been saved. Check with priority-axi get or show before creating it again.',
     );
   }
   const text = buffer.toString('utf8');
