@@ -530,6 +530,100 @@ export async function startFake(options: FakeOptions = {}) {
       return err(500, 'Unable to cast object of type ...');
     if (path.startsWith('GetMetadataFor'))
       return err(404, 'netprest return no data');
+    // A record named by its key, NAME('K') or NAME(F='K',G=1), and optionally
+    // one of its sub-screens, or one line of it: the updates priority-axi sends.
+    const keyed =
+      /^([A-Za-z][A-Za-z0-9_]*)\(([^)]*)\)(?:\/([A-Za-z][A-Za-z0-9_]*)(?:\(([^)]*)\))?)?$/.exec(
+        path,
+      );
+    if (keyed) {
+      const [, set = '', keyText = '', nav, lineText] = keyed;
+      if (!SETS.includes(set)) return send(404);
+      if (!enabled.has(set))
+        return err(400, english ? EN_NOT_ENABLED : HE_NOT_ENABLED);
+      if (req.method !== 'PATCH' && req.method !== 'POST') return send(405);
+      state.posts++;
+      if (options.gate === 'hold')
+        return send(409, undefined, {
+          'Comis-Refusal': 'approval_pending',
+          'Comis-Action': `A-${state.posts}`,
+        });
+      // A key literal: a quoted string with '' for a quote, or a number.
+      const value = (text: string): unknown =>
+        /^'.*'$/.test(text)
+          ? text.slice(1, -1).replace(/''/g, "'")
+          : Number(text);
+      const pairs = (text: string, key: string[]): Row => {
+        const out: Row = {};
+        for (const part of text.split(',')) {
+          const eq = part.indexOf('=');
+          if (eq < 0) out[key[0] ?? ''] = value(part);
+          else out[part.slice(0, eq)] = value(part.slice(eq + 1));
+        }
+        return out;
+      };
+      const setType = String(container[set]?.$Type).split('.').pop() ?? set;
+      const setKey = (typeOf(setType).$Key as string[] | undefined) ?? [];
+      const wanted = pairs(keyText, setKey);
+      const row = (state.rows[set] ?? []).find((r) =>
+        Object.entries(wanted).every(([k, v]) => r[k] === v),
+      );
+      if (!row) return err(404, 'הרשומה לא נמצאה');
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const change = JSON.parse(body) as Row;
+      const check = (type: string): ReturnType<typeof err> | undefined => {
+        for (const name of Object.keys(change)) {
+          const def = typeOf(type)[name] as Json | undefined;
+          if (!def)
+            return err(
+              400,
+              `Could not find a property named '${name}' on type '${type}'.`,
+            );
+          if (def['@Org.OData.Core.V1.Permissions'] === 'Read')
+            return err(400, `שדה ${name} הוא לקריאה בלבד`);
+        }
+        return undefined;
+      };
+      if (!nav) {
+        if (req.method !== 'PATCH') return send(405);
+        const refused = check(setType);
+        if (refused) return refused;
+        Object.assign(row, change, { _changed: new Date().toISOString() });
+        return send(200, full(setType, row));
+      }
+      const link = navsOf(setType).find(([n]) => n === nav);
+      if (!link) return send(404);
+      const lineType = String(link[1].$Type).split('.').pop() ?? '';
+      const refused = check(lineType);
+      if (refused) return refused;
+      row[nav] ??= [];
+      const lines = row[nav] as Row[];
+      if (lineText === undefined) {
+        if (req.method !== 'POST') return send(405);
+        // A purchase order line needs a project, as on the test server.
+        if (set === 'PORDERS' && !change.PROJDES && !change.DOCNO)
+          return send(400, {
+            FORM: {
+              '@TYPE': set,
+              InterfaceErrors: { text: 'שורה 1-יש להכניס פרויקט' },
+            },
+          });
+        const line: Row = { ...change, KLINE: lines.length + 1 };
+        lines.push(line);
+        row._changed = new Date().toISOString();
+        return send(201, full(lineType, line));
+      }
+      if (req.method !== 'PATCH') return send(405);
+      const lineKey = pairs(lineText, ['KLINE']);
+      const line = lines.find((l) =>
+        Object.entries(lineKey).every(([k, v]) => l[k] === v),
+      );
+      if (!line) return err(404, 'השורה לא נמצאה');
+      Object.assign(line, change);
+      row._changed = new Date().toISOString();
+      return send(200, full(lineType, line));
+    }
     if (!SETS.includes(path)) return send(404);
     if (!enabled.has(path))
       return err(400, english ? EN_NOT_ENABLED : HE_NOT_ENABLED);

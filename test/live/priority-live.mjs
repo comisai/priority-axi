@@ -30,7 +30,7 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SCREENS =
   'CUSTOMERS,SUPPLIERS,LOGPART,PART,ORDERS,PORDERS,CINVOICES,AINVOICES,DOCUMENTS_D,DOCUMENTS_p,ACCOUNTS,CURRENCIES,COUNTRIES';

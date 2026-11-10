@@ -1,13 +1,18 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { AxiError } from '../../src/errors.ts';
-import { buildIndex, type Field } from '../../src/index/build.ts';
+import {
+  buildIndex,
+  type Field,
+  type ScreenType,
+} from '../../src/index/build.ts';
 import {
   combineFilters,
   literal,
   orderBy,
   parseWhere,
   queryString,
+  recordSegment,
   screenSegment,
   utc,
   whereToFilter,
@@ -148,5 +153,66 @@ describe('query parts', () => {
       (e: unknown) => e instanceof AxiError && e.code === 'internal_error',
     );
     assert.throws(() => screenSegment("ORDERS('SO1')"), AxiError);
+  });
+});
+
+describe('recordSegment', () => {
+  const type = (key: string[], fields: Field[]): ScreenType => ({
+    key,
+    fields,
+    subs: [],
+  });
+  const text = (name: string, max = 20): Field => ({
+    name,
+    type: 'String',
+    max,
+  });
+  const int = (name: string): Field => ({ name, type: 'Int64' });
+
+  it('quotes a text key and doubles a quote inside it', () => {
+    assert.equal(
+      recordSegment(
+        'CUSTOMERS',
+        type(['CUSTNAME'], [text('CUSTNAME')]),
+        "O'Brien",
+      ),
+      "CUSTOMERS('O''Brien')",
+    );
+    assert.equal(
+      recordSegment('ORDERS', type(['ORDNAME'], [text('ORDNAME')]), 'A(1)'),
+      "ORDERS('A(1)')",
+    );
+  });
+
+  it('writes a number key bare, or named for a line', () => {
+    const lines = type(['KLINE'], [int('KLINE')]);
+    assert.equal(
+      recordSegment('ORDERITEMS_SUBFORM', lines, '3'),
+      'ORDERITEMS_SUBFORM(3)',
+    );
+    assert.equal(
+      recordSegment('ORDERITEMS_SUBFORM', lines, '3', true),
+      'ORDERITEMS_SUBFORM(KLINE=3)',
+    );
+    assert.throws(
+      () => recordSegment('ORDERITEMS_SUBFORM', lines, '3 '),
+      /whole number/,
+    );
+  });
+
+  it('names every part of a compound key once', () => {
+    const t = type(['USER', 'DAY'], [text('USER'), int('DAY')]);
+    assert.equal(recordSegment('X', t, 'USER=u1,DAY=2'), "X(USER='u1',DAY=2)");
+    assert.throws(() => recordSegment('X', t, 'u1'), /compound key/);
+    assert.throws(
+      () => recordSegment('X', t, 'USER=u1,USER=u2'),
+      /compound key/,
+    );
+  });
+
+  it('refuses what the Gate would refuse: traversal, encodings and control text', () => {
+    const t = type(['ORDNAME'], [text('ORDNAME', 300)]);
+    for (const bad of ['..', 'a/b', '%27', 'a\\b', 'a\nb', '', 'x'.repeat(260)])
+      assert.throws(() => recordSegment('ORDERS', t, bad), bad);
   });
 });

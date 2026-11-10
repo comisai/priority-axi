@@ -145,3 +145,62 @@ export function screenSegment(name: string): string {
   }
   return name;
 }
+
+// The longest record segment the Gate's key type takes.
+const SEGMENT_MAX = 256;
+
+/**
+ * A record's path segment, NAME(<key>), for an update. A screen with one key
+ * field takes its value as given; a compound key takes F=V pairs joined by
+ * commas, one per key field. Each value is a typed OData literal. A value may
+ * not hold a slash, a percent sign, a backslash, a control character or two dots:
+ * the Gate's record type refuses them, and so does this.
+ */
+export function recordSegment(
+  name: string,
+  type: ScreenType,
+  raw: string,
+  named = false,
+): string {
+  screenSegment(name);
+  if (!type.key.length)
+    throw usage(`${name} has no key, so its records cannot be updated.`);
+  const values: Array<[string, string]> = [];
+  if (type.key.length === 1) {
+    values.push([type.key[0] ?? '', raw]);
+  } else {
+    for (const pair of raw.split(',')) {
+      const t = /^([A-Za-z][A-Za-z0-9_]*)=(.*)$/s.exec(pair);
+      if (!t)
+        throw usage(
+          `${name} has a compound key (${type.key.join(', ')}); give it as ${type.key.map((k) => `${k}=VALUE`).join(',')}.`,
+        );
+      values.push([t[1] ?? '', t[2] ?? '']);
+    }
+    const given = values.map(([f]) => f.toUpperCase()).sort();
+    const keys = [...type.key].map((k) => k.toUpperCase()).sort();
+    if (given.join() !== keys.join())
+      throw usage(
+        `${name} has a compound key (${type.key.join(', ')}); give each once as ${type.key.map((k) => `${k}=VALUE`).join(',')}.`,
+      );
+  }
+  const parts: string[] = [];
+  for (const [fieldName, value] of values) {
+    if (!value) throw usage(`The key ${fieldName} needs a value.`);
+    if (value.includes('..') || /[/%\\\p{Cc}]/u.test(value))
+      throw usage(
+        'A key value cannot hold a slash, a percent sign, a backslash, a control character or two dots in a row.',
+      );
+    const field = resolveField(type, name, fieldName);
+    const text = literal(field, value);
+    parts.push(
+      type.key.length === 1 && !named ? text : `${field.name}=${text}`,
+    );
+  }
+  const segment = `${name}(${parts.join(',')})`;
+  if (segment.length > SEGMENT_MAX)
+    throw usage(
+      `The record's key is longer than ${SEGMENT_MAX - name.length - 2} characters.`,
+    );
+  return segment;
+}

@@ -579,3 +579,154 @@ describe('create', () => {
     });
   });
 });
+
+describe('update, add-line and update-line', () => {
+  const ROOT = '/odata/Priority/tabula.ini/a150125';
+  async function newOrder(): Promise<string> {
+    const r = await run(['create', 'ORDERS', '--set', 'CUSTNAME=C1001']);
+    assert.equal(r.code, 0, r.out);
+    const key = /key: (SO26000\d+)/.exec(r.out)?.[1];
+    assert.ok(key, r.out);
+    return key;
+  }
+
+  it('shows each change as a dry run without sending it', async () => {
+    const key = await newOrder();
+    const posts = fake.state.posts;
+    for (const [args, request] of [
+      [
+        ['update', 'ORDERS', key, '--set', 'DETAILS=new', '--dry-run'],
+        `PATCH ${ROOT}/ORDERS('${key}')`,
+      ],
+      [
+        [
+          'add-line',
+          'ORDERS',
+          key,
+          'ORDERITEMS',
+          'PARTNAME=P-9',
+          'TQUANT=2',
+          '--dry-run',
+        ],
+        `POST ${ROOT}/ORDERS('${key}')/ORDERITEMS_SUBFORM`,
+      ],
+      [
+        [
+          'update-line',
+          'ORDERS',
+          key,
+          'ORDERITEMS',
+          '1',
+          '--set',
+          'TQUANT=3',
+          '--dry-run',
+        ],
+        `PATCH ${ROOT}/ORDERS('${key}')/ORDERITEMS_SUBFORM(KLINE=1)`,
+      ],
+    ] as const) {
+      const r = await run([...args]);
+      assert.equal(r.code, 0, r.out);
+      assert.ok(
+        r.out.startsWith(`dry_run: true\nrequest: ${request}\n`),
+        r.out,
+      );
+      assert.match(r.out, /transactions: 1\n/);
+    }
+    assert.equal(fake.state.posts, posts);
+  });
+
+  it('updates a record, adds a line and changes it, each sent once', async () => {
+    const key = await newOrder();
+    const posts = fake.state.posts;
+    const updated = await run([
+      'update',
+      'ORDERS',
+      key,
+      '--set',
+      'DETAILS=site B',
+    ]);
+    assert.equal(updated.code, 0, updated.out);
+    assert.match(updated.out, /^updated: ORDERS\n/);
+    const added = await run([
+      'add-line',
+      'ORDERS',
+      key,
+      'ORDERITEMS',
+      'PARTNAME=P-9',
+      'TQUANT=2',
+    ]);
+    assert.equal(added.code, 0, added.out);
+    assert.match(added.out, /^added: ORDERS\n/);
+    const changed = await run([
+      'update-line',
+      'ORDERS',
+      key,
+      'ORDERITEMS',
+      'KLINE=1',
+      '--set',
+      'TQUANT=6',
+    ]);
+    assert.equal(changed.code, 0, changed.out);
+    assert.equal(fake.state.posts, posts + 3);
+    const row = fake.state.rows.ORDERS?.find((r) => r.ORDNAME === key);
+    assert.equal(row?.DETAILS, 'site B');
+    assert.deepEqual(row?.ORDERITEMS_SUBFORM, [
+      { PARTNAME: 'P-9', TQUANT: 6, KLINE: 1 },
+    ]);
+  });
+
+  it('reports a change the Gate holds for the owner, sent once', async () =>
+    withFake({ gate: 'hold' }, async (held) => {
+      const r = await runner(held)([
+        'update',
+        'ORDERS',
+        'SO26000101',
+        '--set',
+        'DETAILS=x',
+      ]);
+      assert.equal(r.code, 1);
+      assert.match(r.out, /code: held_for_approval/);
+      assert.equal(held.state.posts, 1);
+    }));
+
+  it('refuses a key or a change the Gate would refuse, before sending', async () => {
+    const posts = fake.state.posts;
+    for (const [args, pattern] of [
+      [
+        ['update', 'ORDERS', 'SO1/..', '--set', 'DETAILS=x'],
+        /cannot hold a slash/,
+      ],
+      [
+        ['update', 'ORDERS', 'SO%2F1', '--set', 'DETAILS=x'],
+        /cannot hold a slash, a percent sign/,
+      ],
+      [['update', 'ORDERS', 'a\\b', '--set', 'DETAILS=x'], /a backslash/],
+      [['update', 'ORDERS', 'SO..1', '--set', 'DETAILS=x'], /two dots/],
+      [['update', 'ORDERS', 'SO1', '--set', 'ORDNAME=SO2'], /names the record/],
+      [['update', 'ORDERS', 'SO1', '--set', 'POSITIONDES=x'], /read-only/],
+      [['update', 'ORDERS', 'SO1'], /Nothing to change/],
+      [['add-line', 'ORDERS', 'SO1', 'NOSUCH', 'A=1'], /has no sub-screen/],
+      [
+        [
+          'update-line',
+          'ORDERS',
+          'SO1',
+          'ORDERITEMS',
+          'x',
+          '--set',
+          'TQUANT=1',
+        ],
+        /whole number/,
+      ],
+      [
+        ['update', 'ORDERS', 'x'.repeat(260), '--set', 'DETAILS=x'],
+        /longer than|at most/,
+      ],
+    ] as const) {
+      const r = await run([...args]);
+      assert.equal(r.code, 2, `${args.join(' ')}\n${r.out}`);
+      assert.match(r.out, pattern, args.join(' '));
+    }
+    assert.equal(fake.state.posts, posts);
+  });
+});

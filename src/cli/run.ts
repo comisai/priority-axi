@@ -8,6 +8,7 @@ import { find as findRecords } from '../commands/find.ts';
 import { home } from '../commands/home.ts';
 import { changes, get, show } from '../commands/read.ts';
 import { refresh } from '../commands/refresh.ts';
+import { addLine, update, updateLine } from '../commands/update.ts';
 import { AxiError, usage } from '../errors.ts';
 import { errorText } from '../output/toon.ts';
 import { VERSION } from '../version.ts';
@@ -22,7 +23,7 @@ import {
 } from './table.ts';
 
 export const DESCRIPTION =
-  'Read and create Priority ERP records over its REST API';
+  'Read, create and update Priority ERP records over its REST API';
 
 export const COMMANDS: readonly CommandSpec[] = [
   {
@@ -231,6 +232,73 @@ export const COMMANDS: readonly CommandSpec[] = [
     },
     summary: 'Create a record; inside Comis the owner approves it first',
     run: create,
+  },
+  {
+    name: 'update',
+    args: [
+      { name: '<SCREEN>', required: true },
+      { name: '<key>', required: true },
+    ],
+    flags: {
+      set: {
+        type: 'string',
+        multiple: true,
+        value: '<F=V>',
+        summary: 'A field to change',
+      },
+      'dry-run': {
+        type: 'boolean',
+        summary: 'Check and show the request without sending it',
+      },
+      ...CONNECTION_FLAGS,
+    },
+    summary:
+      'Change fields of one record; inside Comis the owner approves it first',
+    run: update,
+  },
+  {
+    name: 'add-line',
+    args: [
+      { name: '<SCREEN>', required: true },
+      { name: '<key>', required: true },
+      { name: '<SUB>', required: true },
+      { name: '<F=V>', required: true, variadic: true },
+    ],
+    flags: {
+      'dry-run': {
+        type: 'boolean',
+        summary: 'Check and show the request without sending it',
+      },
+      ...CONNECTION_FLAGS,
+    },
+    summary:
+      "Add one line to a record's sub-screen; inside Comis the owner approves it first",
+    run: addLine,
+  },
+  {
+    name: 'update-line',
+    args: [
+      { name: '<SCREEN>', required: true },
+      { name: '<key>', required: true },
+      { name: '<SUB>', required: true },
+      { name: '<line-key>', required: true },
+    ],
+    flags: {
+      set: {
+        type: 'string',
+        multiple: true,
+        value: '<F=V>',
+        summary: 'A field of the line to change',
+      },
+      'dry-run': {
+        type: 'boolean',
+        summary: 'Check and show the request without sending it',
+      },
+      ...CONNECTION_FLAGS,
+    },
+    summary:
+      "Change one line of a record's sub-screen; inside Comis the owner approves it first",
+    run: updateLine,
   },
   {
     name: 'refresh',
