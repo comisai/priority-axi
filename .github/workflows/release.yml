@@ -2,6 +2,9 @@ name: release
 # Publishes priority-axi to npm with signed provenance when a v* tag is pushed.
 # Comis installs AXIs only when their provenance names the source repository
 # (D335; scripts/axi-publishers.mjs), and npm provenance needs a public repository.
+# npm trusted publishing authenticates this job by its GitHub OIDC identity, so
+# no npm token is stored. The package's trusted publisher on npmjs.com must name
+# comisai/priority-axi, this file (release.yml) and the `npm` environment.
 on:
   push:
     tags: ["v*"]
@@ -33,6 +36,15 @@ jobs:
       - run: npm test
       - run: npm run test:dist
       - run: node scripts/check-package.mjs
+      - name: npm supports trusted publishing
+        # npm 11.5.1 is the first release that exchanges the OIDC token.
+        run: |
+          version="$(npm --version)"
+          node -e '
+            const [a, b, c] = process.argv[1].split(".").map(Number);
+            process.exit(a * 1e6 + b * 1e3 + c < 11005001 ? 1 : 0);
+          ' "$version" || {
+            echo "npm $version cannot use trusted publishing; it needs 11.5.1 or later."
+            exit 1
+          }
       - run: npm publish --provenance --access public --ignore-scripts
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
