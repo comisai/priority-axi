@@ -14,6 +14,7 @@ export type ErrorCode =
   | 'not_found'
   | 'already_exists'
   | 'priority_rejected'
+  | 'partly_saved'
   | 'unsupported_query'
   | 'rate_limited'
   | 'priority_error'
@@ -26,6 +27,11 @@ export type ErrorFields = Record<string, string | number>;
 export class AxiError extends Error {
   readonly code: ErrorCode;
   readonly fields: ErrorFields;
+  /**
+   * The lowest line of a deep-insert body that Priority's form errors name
+   * ("שורה 2-" or "Line 2-"; line 1 is the record itself). Not printed.
+   */
+  formLine?: number;
 
   constructor(code: ErrorCode, message: string, fields: ErrorFields = {}) {
     super(message);
@@ -72,6 +78,7 @@ export interface HttpAnswer {
 export interface ClassifyContext {
   screen?: string;
   company?: string;
+  method?: string;
 }
 
 const ENTITIES: Record<string, string> = {
@@ -124,6 +131,21 @@ function interfaceErrors(json: unknown, text: string | undefined): string[] {
     .filter(Boolean);
 }
 
+// Priority numbers the lines of a deep insert from 1, the record itself, and
+// starts each form error with its line: "שורה 2- ..." or "Line 2- ...".
+const FORM_LINE = /^(?:שורה|Line)\s*(\d+)\s*-/i;
+
+/** The lowest line number Priority's form errors name, if every error names one. */
+export function formLine(json: unknown, text?: string): number | undefined {
+  const lines = interfaceErrors(json, text).map((t) => {
+    const m = FORM_LINE.exec(t);
+    return m ? Number(m[1]) : Number.NaN;
+  });
+  if (!lines.length || lines.some((n) => !Number.isSafeInteger(n)))
+    return undefined;
+  return Math.min(...lines);
+}
+
 /** Priority's own words: an OData error message, or its form errors. */
 export function priorityMessage(
   json: unknown,
@@ -151,6 +173,8 @@ const GATE_REFUSALS: Record<string, string> = {
     'The Gate no longer holds the body of this request. Run the command again only if the owner asks.',
   out_of_budget:
     'The Gate refused this request: the spending budget is used up.',
+  policy_refused:
+    'The Gate refused this request: this workbench may not send it. A reader workbench cannot write; ask the main agent to do it.',
 };
 
 export function classify(
@@ -189,7 +213,7 @@ export function classify(
   if (status === 401) {
     return new AxiError(
       'auth_failed',
-      'Priority rejected the username or password. Check PRIORITY_USER and PRIORITY_PASSWORD.',
+      'Priority rejected the username or password. Do not retry: after 3 failed sign-ins Priority locks the API user for 30 minutes. Check PRIORITY_USER and PRIORITY_PASSWORD with the owner first.',
     );
   }
   if (status === 400 && message && NOT_ENABLED.some((rx) => rx.test(message))) {
@@ -219,26 +243,40 @@ export function classify(
       { priority: message },
     );
   }
+  const said = message ? { priority: message } : {};
+  const write = ctx.method !== undefined && ctx.method !== 'GET';
   if (status === 404) {
     return new AxiError(
       'not_found',
-      ctx.screen
-        ? `Priority has no ${ctx.screen}. Check the name with \`priority-axi screens\`.`
-        : 'Priority answered 404 Not Found.',
-      screen,
+      write
+        ? `Priority found no such ${ctx.screen ? `${ctx.screen} record or line` : 'record'} (404). Check the key with \`priority-axi show ${ctx.screen ?? '<SCREEN>'} <key>\`.`
+        : ctx.screen
+          ? `Priority has no ${ctx.screen}. Check the name with \`priority-axi screens\`.`
+          : 'Priority answered 404 Not Found.',
+      { ...screen, ...said },
     );
   }
   if (status === 409) {
+    if (ctx.method === 'PATCH') {
+      return new AxiError(
+        'priority_rejected',
+        `Priority refused the change as a conflict (409)${message ? `: ${message.replace(/[.!?]?$/, '.')}` : '.'} Read the record with \`priority-axi show\` before changing it again.`,
+        { ...screen, status, ...said },
+      );
+    }
     return new AxiError(
       'already_exists',
-      'Priority says this record already exists. Read it instead of creating it.',
-      { ...screen, ...(message ? { priority: message } : {}) },
+      'Priority says this record already exists. Read it with `priority-axi show` instead of creating it again.',
+      { ...screen, ...said },
     );
   }
   if (status === 429) {
+    const after = headers.get('retry-after');
     return new AxiError(
       'rate_limited',
-      'Priority is limiting requests. Wait a minute, then try again.',
+      after
+        ? 'Priority is limiting requests. Wait a minute, then try again.'
+        : 'Priority is limiting requests, or it has locked the API user after failed sign-ins (Priority 26.1 and later lock it for 30 minutes). Wait before trying again, and do not retry in a loop.',
     );
   }
   if (status === 501) {
@@ -249,11 +287,14 @@ export function classify(
     );
   }
   if (status >= 400 && status < 500) {
-    return new AxiError(
+    const rejected = new AxiError(
       'priority_rejected',
       message ?? `Priority answered ${status} with no message.`,
       { ...screen, status },
     );
+    const line = formLine(json, answer.text);
+    if (line !== undefined) rejected.formLine = line;
+    return rejected;
   }
   return new AxiError(
     'priority_error',

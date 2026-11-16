@@ -9,6 +9,7 @@ import {
 import {
   combineFilters,
   literal,
+  localTime,
   orderBy,
   parseWhere,
   queryString,
@@ -70,11 +71,43 @@ describe('literal', () => {
     assert.throws(() => literal(field('Boolean'), 'Y'), isUsage);
   });
 
-  it('writes dates as UTC with Z', () => {
+  it('sends dates and times as the wall-clock digits given, never shifted to UTC', () => {
+    // Priority reads only the digits of a DateTimeOffset and ignores its offset (live, 23.1).
+    const date = field('DateTimeOffset');
+    assert.equal(literal(date, '2026-10-01'), '2026-10-01T00:00:00Z');
+    assert.equal(literal(date, '2026-10-01T08:00'), '2026-10-01T08:00:00Z');
     assert.equal(
-      literal(field('DateTimeOffset'), '2026-10-01'),
-      '2026-10-01T00:00:00Z',
+      literal(date, '2026-11-20T01:00:00+02:00'),
+      '2026-11-20T01:00:00Z',
     );
+    assert.equal(
+      literal(date, '2026-11-08T00:00:00-05:00'),
+      '2026-11-08T00:00:00Z',
+    );
+    assert.equal(localTime('2026-10-01T08:00Z', 'x'), '2026-10-01T08:00:00Z');
+    assert.equal(
+      localTime('2026-10-01T08:00:05.25', 'x'),
+      '2026-10-01T08:00:05.25Z',
+    );
+    for (const bad of [
+      '2026-02-30',
+      '01/10/2026',
+      '2026-10-01T24:00',
+      '2026-10-01T08:60',
+      '2026-10-01T08',
+      '2026-10-01 08:00',
+    ]) {
+      assert.throws(
+        () => localTime(bad, 'x'),
+        (e: unknown) =>
+          isUsage(e) &&
+          /Priority's local \(company\) time/.test((e as Error).message),
+        bad,
+      );
+    }
+  });
+
+  it('keeps UTC for --since, whose offset Priority honours', () => {
     assert.equal(utc('2026-10-01T08:00:00+03:00', 'x'), '2026-10-01T05:00:00Z');
     assert.equal(utc('2026-10-01T08:00Z', 'x'), '2026-10-01T08:00:00Z');
     assert.throws(() => utc('2026-02-30', 'x'), isUsage);

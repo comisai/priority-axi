@@ -65,6 +65,16 @@ describe('parseCommand', () => {
     assert.ok(!message.includes('secret-123'));
   });
 
+  it('names a mistyped flag, and reads well when the name is not safe to show', () => {
+    assert.match(
+      usageError(() => parseCommand(spec, ['O', '--dry_run'])),
+      /^Unknown flag --dry_run for /,
+    );
+    const odd = usageError(() => parseCommand(spec, ['O', '---full']));
+    assert.match(odd, /^Unknown flag for `/);
+    assert.doesNotMatch(odd, /that flag/);
+  });
+
   it('refuses repeats, values on boolean flags and missing values', () => {
     assert.match(
       usageError(() =>

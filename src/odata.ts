@@ -35,8 +35,13 @@ const DECIMAL = new Set(['Decimal', 'Double', 'Single']);
 const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 const TIME =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+const LOCAL =
+  /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(\.\d{1,7})?)?)?(?:Z|[+-]\d{2}:\d{2})?$/;
 
-/** A UTC timestamp with seconds and Z, as Priority recommends for filters. */
+/**
+ * A UTC timestamp with seconds and Z, for --since only: Priority's $since
+ * honours the offset, and its docs recommend UTC with Z for it.
+ */
 export function utc(raw: string, flag: string): string {
   const day = DAY.exec(raw);
   let ms: number;
@@ -48,10 +53,35 @@ export function utc(raw: string, flag: string): string {
   }
   if (!Number.isFinite(ms)) {
     throw usage(
-      `Invalid date for ${flag}; use YYYY-MM-DD or a full time such as 2026-10-01T08:00:00Z.`,
+      `Invalid date for ${flag}; use YYYY-MM-DD, 7d, 24h or a full UTC time such as 2026-10-01T06:00:00Z.`,
     );
   }
   return new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+/**
+ * A date or time in Priority's local (company) time, for --where, --set and
+ * --json-file. Priority reads only the wall-clock digits of a DateTimeOffset
+ * in $filter and in a write body, and ignores its offset (live, 23.1). So the
+ * digits go out exactly as given, with any offset dropped, never converted to
+ * UTC. The Z only completes the literal's form.
+ */
+export function localTime(raw: string, flag: string): string {
+  const m = LOCAL.exec(raw);
+  const [, y, mo, d, h = '00', mi = '00', sec = '00', frac = ''] = m ?? [];
+  const day = Date.UTC(Number(y), Number(mo) - 1, Number(d));
+  const real =
+    m &&
+    new Date(day).toISOString().slice(0, 10) === `${y}-${mo}-${d}` &&
+    Number(h) < 24 &&
+    Number(mi) < 60 &&
+    Number(sec) < 60;
+  if (!real) {
+    throw usage(
+      `Invalid date for ${flag}; use YYYY-MM-DD or YYYY-MM-DDTHH:MM in Priority's local (company) time, such as 2026-10-01T08:00. An offset is ignored, never converted.`,
+    );
+  }
+  return `${y}-${mo}-${d}T${h}:${mi}:${sec}${frac}Z`;
 }
 
 /** An OData literal for a value of this field's type. */
@@ -76,7 +106,7 @@ export function literal(field: Field, raw: string): string {
     return raw;
   }
   if (field.type === 'DateTimeOffset' || field.type === 'Date')
-    return utc(raw, `--where ${field.name}`);
+    return localTime(raw, `--where ${field.name}`);
   throw usage(
     `--where cannot filter ${field.name} (${field.type}); use --filter with raw OData.`,
   );

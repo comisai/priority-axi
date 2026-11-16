@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { main } from '../../src/cli/run.ts';
-import { defaultDeps } from '../../src/http.ts';
+import { defaultDeps, type HttpDeps } from '../../src/http.ts';
 import { OUTPUT_LIMIT } from '../../src/output/toon.ts';
 import { type FakeOptions, startFake } from '../fake/priority-fake.ts';
 import { tempDir } from '../helpers.ts';
@@ -13,7 +13,7 @@ import { tempDir } from '../helpers.ts';
 type Fake = Awaited<ReturnType<typeof startFake>>;
 const NOW = new Date('2026-11-05T12:00:00.000Z');
 
-function runner(fake: Fake, cache = tempDir()) {
+function runner(fake: Fake, cache = tempDir(), http: Partial<HttpDeps> = {}) {
   return async (args: string[], env: Record<string, string> = {}) => {
     const out: string[] = [];
     const code = await main(args, {
@@ -28,7 +28,7 @@ function runner(fake: Fake, cache = tempDir()) {
         ...env,
       },
       now: () => NOW,
-      http: { fetch: defaultDeps.fetch, sleep: async () => {} },
+      http: { fetch: defaultDeps.fetch, sleep: async () => {}, ...http },
     });
     return { code, out: out.join('') };
   };
@@ -165,6 +165,33 @@ describe('get', () => {
     );
   });
 
+  it('sends --where times as the wall-clock digits given, never shifted to UTC', async () => {
+    // Priority compares the digits and ignores the offset (live, 23.1); so does the fake.
+    const r = await run([
+      'get',
+      'ORDERS',
+      '--where',
+      'CURDATE=2026-10-03T00:00:00+02:00',
+    ]);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /^summary: 1 record from ORDERS\n/);
+    assert.match(r.out, /\n {2}SO26000101,/);
+    assert.match(
+      fake.state.lastQuery ?? '',
+      /\$filter=CURDATE%20eq%202026-10-03T00%3A00%3A00Z&/,
+    );
+    const range = await run([
+      'get',
+      'ORDERS',
+      '--where',
+      'CURDATE>=2026-10-03',
+      '--where',
+      'CURDATE<2026-10-05',
+    ]);
+    assert.match(range.out, /^summary: 2 records from ORDERS\n/);
+    assert.match(range.out, /\n {2}SO26000101,[^\n]*\n {2}SO26000102,/);
+  });
+
   it('states an empty result with exit 0', async () => {
     const r = await run(['get', 'ORDERS', '--where', 'CUSTNAME=NOPE']);
     assert.equal(r.code, 0);
@@ -189,7 +216,7 @@ describe('get', () => {
     // Lines are narrowed and capped on the server: 5 shown, one more to see whether more exist.
     assert.match(
       decodeURIComponent(fake.state.lastQuery ?? ''),
-      /\$expand=ORDERITEMS_SUBFORM\(\$select=KLINE,[A-Z0-9_,]+;\$top=6\)(&|$)/,
+      /\$expand=ORDERITEMS_SUBFORM\(\$select=KLINE,[A-Z0-9_,]+;\$orderby=KLINE;\$top=6\)(&|$)/,
     );
   });
 
@@ -235,7 +262,7 @@ describe('get', () => {
     assert.equal(r.code, 0, r.out);
     assert.match(
       decodeURIComponent(fake.state.lastQuery ?? ''),
-      /\$expand=ORDERITEMS_SUBFORM(&|$)/,
+      /\$expand=ORDERITEMS_SUBFORM\(\$orderby=KLINE\)(&|$)/,
     );
   });
 
@@ -289,6 +316,116 @@ describe('get', () => {
       assert.equal(r.code, 2, args.join(' '));
     }
     assert.equal(fake.state.gets, before);
+  });
+
+  it('continues after the last record shown when the output bound drops records', async () => {
+    await withFake(
+      { enabled: ['CUSTOMERS', 'ORDERS', 'LOGPART'], parts: 600 },
+      async (f) => {
+        const local = runner(f);
+        const r = await local(['get', 'LOGPART', '--limit', '200']);
+        assert.equal(r.code, 0, r.out);
+        const shown = Number(/; (\d+) of 200 shown"/.exec(r.out)?.[1]);
+        assert.ok(shown > 0 && shown < 200, r.out);
+        assert.match(
+          r.out,
+          /^summary: "200 records from LOGPART, more exist; \d+ of 200 shown"\n/,
+        );
+        assert.ok(r.out.length <= OUTPUT_LIMIT);
+        const hint = new RegExp(
+          `Run \`priority-axi get LOGPART --limit 200 --offset ${shown}\` for the records after the ${shown} shown`,
+        );
+        assert.match(r.out, hint);
+        assert.doesNotMatch(r.out, /--page 2/);
+        // The hint's read starts at the first record not shown: none is skipped.
+        const keys = (f.state.rows.LOGPART ?? [])
+          .map((p) => String(p.PARTNAME))
+          .sort((a, b) => a.localeCompare(b));
+        const last = /\n {2}(\S+?),[^\n]*\nomitted:/.exec(r.out)?.[1];
+        assert.equal(last, keys[shown - 1]);
+        const next = await local([
+          'get',
+          'LOGPART',
+          '--limit',
+          '200',
+          '--offset',
+          String(shown),
+        ]);
+        assert.equal(next.code, 0, next.out);
+        assert.match(next.out, new RegExp(`from record ${shown + 1}\\)`));
+        assert.match(
+          next.out,
+          new RegExp(`\\]\\{[^}]*\\}:\\n {2}${keys[shown]},`),
+        );
+        // From page 2, the hint continues at the absolute record, without --page.
+        const page2 = await local([
+          'get',
+          'LOGPART',
+          '--limit',
+          '200',
+          '--page',
+          '2',
+        ]);
+        const shown2 = Number(/; (\d+) of 200 shown"/.exec(page2.out)?.[1]);
+        assert.match(
+          page2.out,
+          new RegExp(`--limit 200 --offset ${200 + shown2}\``),
+        );
+        const both = await local([
+          'get',
+          'LOGPART',
+          '--page',
+          '2',
+          '--offset',
+          '5',
+        ]);
+        assert.equal(both.code, 2);
+        assert.match(both.out, /Use --page or --offset, not both/);
+      },
+    );
+  });
+
+  it('pages by --offset when it is given', async () => {
+    const r = await run(['get', 'ORDERS', '--limit', '3', '--offset', '2']);
+    assert.equal(r.code, 0, r.out);
+    assert.match(
+      r.out,
+      /^summary: "3 records from ORDERS \(from record 3\), more exist"\n/,
+    );
+    assert.match(r.out, /\n {2}SO26000103,/);
+    assert.match(
+      r.out,
+      /Run `priority-axi get ORDERS --limit 3 --offset 5` for the next 3/,
+    );
+  });
+
+  it('shows sub-screen lines in key order, whatever order Priority sends', async () => {
+    const order = fake.state.rows.ORDERS?.find(
+      (o) => o.ORDNAME === 'SO26000103',
+    );
+    assert.ok(order);
+    const lines = order.ORDERITEMS_SUBFORM as Record<string, unknown>[];
+    order.ORDERITEMS_SUBFORM = [...lines].reverse();
+    try {
+      const r = await run([
+        'show',
+        'ORDERS',
+        'SO26000103',
+        '--with',
+        'ORDERITEMS',
+      ]);
+      assert.equal(r.code, 0, r.out);
+      assert.match(
+        r.out,
+        /ORDERITEMS\[3\]\{KLINE,[^}]*\}:\n {2}1,[^\n]*\n {2}2,[^\n]*\n {2}3,/,
+      );
+      assert.match(
+        decodeURIComponent(fake.state.lastQuery ?? ''),
+        /\$orderby=KLINE;\$top=6\)/,
+      );
+    } finally {
+      order.ORDERITEMS_SUBFORM = lines;
+    }
   });
 
   it('retries a read once after a short 429', async () => {
@@ -459,6 +596,26 @@ describe('create', () => {
     ]);
   });
 
+  it('writes a +02:00 time as its wall-clock digits, not shifted a day back', async () => {
+    const args = [
+      'create',
+      'ORDERS',
+      '--set',
+      'CUSTNAME=C1002',
+      '--set',
+      'DUEDATE=2026-11-20T01:00:00+02:00',
+    ];
+    const dry = await run([...args, '--dry-run']);
+    assert.match(dry.out, /\n {2}DUEDATE: "2026-11-20T01:00:00Z"\n/);
+    const r = await run(args);
+    assert.equal(r.code, 0, r.out);
+    assert.equal(
+      fake.state.rows.ORDERS?.at(-1)?.DUEDATE,
+      '2026-11-20T01:00:00Z',
+    );
+    assert.match(r.out, /\n {2}DUEDATE: 2026-11-20\n/);
+  });
+
   it('sends a duplicate once and reports already_exists', async () => {
     const posts = fake.state.posts;
     const r = await run([
@@ -524,6 +681,61 @@ describe('create', () => {
       assert.match(r.out, pattern);
     }
     assert.equal(fake.state.posts, posts);
+  });
+
+  it('reports a create whose line Priority refused as partly_saved, names the saved record, and sends nothing more', async () => {
+    const posts = fake.state.posts;
+    const count = fake.state.rows.ORDERS?.length ?? 0;
+    const r = await run([
+      'create',
+      'ORDERS',
+      '--set',
+      'CUSTNAME=C1003',
+      '--set',
+      'DETAILS=[test] bad part',
+      '--line',
+      'ORDERITEMS',
+      'PARTNAME=NOSUCHPART-XYZ',
+      'TQUANT=1',
+    ]);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /\ncode: partly_saved\n/);
+    assert.match(
+      r.out,
+      /^message: "?Priority saved the ORDERS record, and any lines before line 2, but refused line 2 \(line 1 is the record itself\)\. Do not create it again\./,
+    );
+    // The fake saved the order without its line, as QA does; one read found it.
+    assert.equal(fake.state.posts, posts + 1);
+    assert.equal(fake.state.rows.ORDERS?.length, count + 1);
+    const saved = String(fake.state.rows.ORDERS?.at(-1)?.ORDNAME);
+    assert.deepEqual(fake.state.rows.ORDERS?.at(-1)?.ORDERITEMS_SUBFORM, []);
+    assert.match(r.out, new RegExp(`\\nsaved: ${saved}\\n`));
+    assert.match(r.out, /\nline: 2\n/);
+    assert.match(r.out, /\npriority: "?שורה 2- מק\\?"ט NOSUCHPART-XYZ/);
+    assert.match(
+      r.out,
+      new RegExp(
+        `priority-axi add-line ORDERS ${saved} ORDERITEMS F=V\\.\\.\\.`,
+      ),
+    );
+    assert.match(
+      decodeURIComponent(fake.state.lastQuery ?? ''),
+      /\$filter=CUSTNAME eq 'C1003' and DETAILS eq '\[test\] bad part'&\$select=ORDNAME&\$orderby=ORDNAME desc&\$top=3/,
+    );
+  });
+
+  it('keeps a refusal of the record itself (line 1) as priority_rejected', async () => {
+    const r = await run([
+      'create',
+      'CUSTOMERS',
+      '--set',
+      'CUSTDES=New Ltd',
+      '--line',
+      'CUSTPROJECTS',
+      'PROJDES=x',
+    ]);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /\ncode: priority_rejected\n/);
   });
 
   it('takes the same record from --json-file', async () => {
@@ -689,6 +901,46 @@ describe('update, add-line and update-line', () => {
       assert.equal(held.state.posts, 1);
     }));
 
+  it("passes Priority's 400 for a missing record or line through", async () => {
+    const missing = await run([
+      'update',
+      'ORDERS',
+      'SO99999999',
+      '--set',
+      'DETAILS=x',
+    ]);
+    assert.equal(missing.code, 1);
+    assert.match(missing.out, /\ncode: priority_rejected\n/);
+    assert.match(missing.out, /SO99999999: לא קיימת רשומה כזו/);
+    const key = await newOrder();
+    const line = await run([
+      'update-line',
+      'ORDERS',
+      key,
+      'ORDERITEMS',
+      'KLINE=99',
+      '--set',
+      'TQUANT=1',
+    ]);
+    assert.equal(line.code, 1);
+    assert.match(line.out, /A record with the specified key was not found/);
+  });
+
+  it('quotes the key in the read-back hint', async () => {
+    const created = await run([
+      'create',
+      'ORDERS',
+      '--set',
+      'ORDNAME=SO X1',
+      '--set',
+      'CUSTNAME=C1001',
+    ]);
+    assert.equal(created.code, 0, created.out);
+    const r = await run(['update', 'ORDERS', 'SO X1', '--set', 'DETAILS=y']);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /Run `priority-axi show ORDERS 'SO X1' --with <SUB>`/);
+  });
+
   it('refuses a key or a change the Gate would refuse, before sending', async () => {
     const posts = fake.state.posts;
     for (const [args, pattern] of [
@@ -728,5 +980,114 @@ describe('update, add-line and update-line', () => {
       assert.match(r.out, pattern, args.join(' '));
     }
     assert.equal(fake.state.posts, posts);
+  });
+});
+
+describe('a write whose answer is lost', () => {
+  it('says a create or update may have been saved when the connection breaks after it was sent', async () =>
+    withFake({ lose: 'drop' }, async (f) => {
+      const local = runner(f);
+      const count = f.state.rows.ORDERS?.length ?? 0;
+      const r = await local(['create', 'ORDERS', '--set', 'CUSTNAME=C1001']);
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, /\ncode: unreachable\n/);
+      assert.match(
+        r.out,
+        /The connection to Priority broke after the create was sent, so Priority may have saved the create\. Check with `priority-axi show` or `priority-axi get` before sending it again\. Do not retry\./,
+      );
+      assert.doesNotMatch(r.out, /could not be reached/);
+      // It did land, once.
+      assert.equal(f.state.posts, 1);
+      assert.equal(f.state.rows.ORDERS?.length, count + 1);
+      const u = await local([
+        'update',
+        'ORDERS',
+        'SO26000101',
+        '--set',
+        'DETAILS=z',
+      ]);
+      assert.match(u.out, /may have saved the update\. .*Do not retry\./);
+      assert.equal(f.state.rows.ORDERS?.[0]?.DETAILS, 'z');
+      assert.equal(f.state.posts, 2);
+    }));
+
+  it('says the same when Priority does not answer a write in time', async () =>
+    withFake({ lose: 'stall-writes' }, async (f) => {
+      const r = await runner(f, tempDir(), { timeouts: { write: 300 } })([
+        'add-line',
+        'ORDERS',
+        'SO26000101',
+        'ORDERITEMS',
+        'PARTNAME=P-100',
+        'TQUANT=1',
+      ]);
+      assert.equal(r.code, 1, r.out);
+      assert.match(
+        r.out,
+        /Priority did not answer within 1 s after the new line was sent, so Priority may have saved the new line\. .*Do not retry\./,
+      );
+      assert.equal(f.state.posts, 1);
+    }));
+
+  it('says nothing was sent when Priority refuses the connection', async () => {
+    const cache = tempDir();
+    const f = await startFake();
+    const local = runner(f, cache);
+    assert.equal((await local(['get', 'ORDERS', '--limit', '1'])).code, 0);
+    await f.close();
+    // Let the client see its kept-alive connection close; a reset on a reused
+    // connection could come after sending, and is reported as such.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const r = await local(['create', 'ORDERS', '--set', 'CUSTNAME=C1001']);
+    assert.equal(r.code, 1, r.out);
+    assert.match(
+      r.out,
+      /^message: "?Priority could not be reached, so nothing was sent\. Check the address, or whether the Gate is running\./,
+    );
+  });
+});
+
+describe('COMIS_DEADLINE', () => {
+  it('cuts a read short at the deadline and says to run it from a worker', async () =>
+    withFake({ lose: 'stall-reads' }, async (f) => {
+      const started = Date.now();
+      const r = await runner(f)(['get', 'ORDERS'], {
+        COMIS_DEADLINE: String(Date.now() + 2500),
+      });
+      assert.equal(r.code, 1, r.out);
+      assert.ok(Date.now() - started < 2500);
+      assert.match(
+        r.out,
+        /Priority did not answer within the \d s left before this command's deadline\. Run it from a worker/,
+      );
+    }));
+
+  it('refuses a write without sending it when too little time is left for the approval hold', async () => {
+    const cache = tempDir();
+    const local = runner(fake, cache);
+    await local(['get', 'ORDERS', '--limit', '1']);
+    const posts = fake.state.posts;
+    const r = await local(['create', 'ORDERS', '--set', 'CUSTNAME=C1001'], {
+      COMIS_DEADLINE: String(Date.now() + 20_000),
+    });
+    assert.equal(r.code, 1, r.out);
+    assert.match(
+      r.out,
+      /not enough time for the owner's approval hold, so nothing was sent\. Run it in a worker/,
+    );
+    assert.equal(fake.state.posts, posts);
+    const late = await local(['get', 'ORDERS'], {
+      COMIS_DEADLINE: String(Date.now() + 500),
+    });
+    assert.match(
+      late.out,
+      /ran out before Priority was asked\. Run it from a worker/,
+    );
+    const bad = await local(['get', 'ORDERS'], { COMIS_DEADLINE: 'soon' });
+    assert.equal(bad.code, 2);
+    assert.match(
+      bad.out,
+      /COMIS_DEADLINE must be a time in epoch milliseconds/,
+    );
   });
 });

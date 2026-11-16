@@ -52,20 +52,48 @@ function candidateSelect(type: ScreenType): string[] {
   return [...keys, ...rest];
 }
 
+/** The key fields of a sub-screen's lines that its type defines, to order them. */
+function lineKey(sub: Sub): string[] {
+  return sub.def.key.filter((k) => sub.def.fields.some((f) => f.name === k));
+}
+
 /**
  * $expand for --with. Without --full, each line list is narrowed and capped on
  * the server: Priority 23.1 honours $select and $top inside $expand (live S9),
  * so a large order does not send every line. One extra line shows that more exist.
+ * Lines are ordered by their key, since Priority sends them in its own order.
  */
 function expandOf(subs: readonly Sub[], full: boolean): string | undefined {
   if (!subs.length) return undefined;
   return subs
-    .map((x) =>
-      !x.many || full
-        ? x.nav
-        : `${x.nav}($select=${candidateSelect(x.def).join(',')};$top=${LINES + 1})`,
-    )
+    .map((x) => {
+      if (!x.many) return x.nav;
+      const key = lineKey(x);
+      const options = [
+        ...(full ? [] : [`$select=${candidateSelect(x.def).join(',')}`]),
+        ...(key.length ? [`$orderby=${key.join(',')}`] : []),
+        ...(full ? [] : [`$top=${LINES + 1}`]),
+      ];
+      return options.length ? `${x.nav}(${options.join(';')})` : x.nav;
+    })
     .join(',');
+}
+
+/** Lines in key order, whatever order Priority sent them in. */
+function byKey(sub: Sub, lines: Row[]): Row[] {
+  const key = lineKey(sub);
+  if (!key.length) return lines;
+  const cmp = (a: unknown, b: unknown) =>
+    typeof a === 'number' && typeof b === 'number'
+      ? a - b
+      : String(a ?? '').localeCompare(String(b ?? ''));
+  return [...lines].sort((a, b) => {
+    for (const k of key) {
+      const c = cmp(a[k], b[k]);
+      if (c) return c;
+    }
+    return 0;
+  });
 }
 
 function explicitFields(
@@ -99,7 +127,7 @@ function subView(
         : undefined;
     return { [sub.name]: one ? recordView(sub.def, one, fieldLimit) : null };
   }
-  const lines = Array.isArray(value) ? (value as Row[]) : [];
+  const lines = Array.isArray(value) ? byKey(sub, value as Row[]) : [];
   const shown = full ? lines : lines.slice(0, LINES);
   const columns = defaultColumns(sub.def, shown);
   return {
@@ -134,6 +162,12 @@ async function list(
   const v = input.values;
   const limit = intFlag(v.limit, 'limit', 20, 1, 500);
   const page = intFlag(v.page, 'page', 1, 1, 1_000_000);
+  const byOffset = v.offset !== undefined;
+  if (byOffset && v.page !== undefined)
+    throw usage('Use --page or --offset, not both.');
+  const offset = intFlag(v.offset, 'offset', 0, 0, 500_000_000);
+  // The first record of this read, counted from 0.
+  const start = byOffset ? offset : (page - 1) * limit;
   const full = v.full === true;
   const since =
     mode === 'changes' ? sinceFlag(v.since, input.io.now()) : undefined;
@@ -159,7 +193,7 @@ async function list(
       $select: select?.join(','),
       $orderby: order,
       $top: limit + 1,
-      $skip: page > 1 ? (page - 1) * limit : undefined,
+      $skip: start || undefined,
       $expand: expandOf(subs, full),
       $since: since,
     }),
@@ -187,8 +221,15 @@ async function list(
 
   const noun = rows.length === 1 ? 'record' : 'records';
   const place = mode === 'changes' ? ` changed since ${since}` : '';
-  const pageNote = page > 1 ? ` (page ${page})` : '';
-  const summary = `${rows.length} ${noun} from ${screen.name}${place}${pageNote}${more ? ', more exist' : ''}`;
+  const pageNote =
+    byOffset && offset > 0
+      ? ` (from record ${offset + 1})`
+      : page > 1
+        ? ` (page ${page})`
+        : '';
+  const summaryOf = (shown: number) =>
+    `${rows.length} ${noun} from ${screen.name}${place}${pageNote}${more ? ', more exist' : ''}${shown < rows.length ? `; ${shown} of ${rows.length} shown` : ''}`;
+  const summary = summaryOf(rows.length);
 
   if (!rows.length) {
     const help =
@@ -216,9 +257,16 @@ async function list(
           return base;
         });
         const help: string[] = [];
-        if (more) {
+        if (shown < rows.length) {
+          // Continue at the first record not shown, so none is skipped.
           help.push(
-            `Run \`${commandLine(mode, [screen.name], v, { page: String(page + 1) })}\` for the next ${limit}`,
+            `Run \`${commandLine(mode, [screen.name], v, { page: null, offset: String(start + shown) })}\` for the records after the ${shown} shown`,
+          );
+        } else if (more) {
+          help.push(
+            byOffset
+              ? `Run \`${commandLine(mode, [screen.name], v, { offset: String(start + limit) })}\` for the next ${limit}`
+              : `Run \`${commandLine(mode, [screen.name], v, { page: String(page + 1) })}\` for the next ${limit}`,
           );
         }
         if (keys.length === 1) {
@@ -228,12 +276,12 @@ async function list(
         }
         return render(
           {
-            summary,
+            summary: summaryOf(shown),
             ...builtNote(loaded),
             records,
             ...(shown < rows.length
               ? {
-                  omitted: `${rows.length - shown} records not shown; use --limit ${Math.max(1, shown)} or --full`,
+                  omitted: `${rows.length - shown} records not shown to keep the output small; the first help line continues after them, or use --full`,
                 }
               : {}),
           },

@@ -17,8 +17,9 @@ export interface Parsed {
   tokens: Token[];
 }
 
+/** "flag --x", or just "flag" when the name is not safe to repeat back. */
 const shownFlag = (raw: string) =>
-  /^--?[A-Za-z0-9][A-Za-z0-9-]{0,40}$/.test(raw) ? raw : 'that flag';
+  /^--?[A-Za-z0-9][A-Za-z0-9_-]{0,40}$/.test(raw) ? `flag ${raw}` : 'flag';
 
 export function parseCommand(spec: CommandSpec, argv: string[]): Parsed {
   const name = commandName(spec);
@@ -57,7 +58,7 @@ export function parseCommand(spec: CommandSpec, argv: string[]): Parsed {
     const f = spec.flags[token.name];
     if (!f) {
       throw usage(
-        `Unknown flag ${shownFlag(token.rawName)} for \`${name}\`. ${valid.length ? `Valid flags: ${valid.join(', ')}.` : 'It takes no flags.'}`,
+        `Unknown ${shownFlag(token.rawName)} for \`${name}\`. ${valid.length ? `Valid flags: ${valid.join(', ')}.` : 'It takes no flags.'}`,
       );
     }
     if (f.type === 'boolean' && token.inlineValue)

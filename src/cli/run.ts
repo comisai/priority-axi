@@ -76,7 +76,8 @@ export const COMMANDS: readonly CommandSpec[] = [
         type: 'string',
         multiple: true,
         value: '<F=V>',
-        summary: 'Filter: F=V, F!=V, F>V, F>=V, F<V or F<=V',
+        summary:
+          "Filter: F=V, F!=V, F>V, F>=V, F<V or F<=V. Dates and times are Priority's local (company) time",
       },
       filter: {
         type: 'string',
@@ -101,6 +102,11 @@ export const COMMANDS: readonly CommandSpec[] = [
         summary: 'Records per page, default 20, at most 500',
       },
       page: { type: 'string', value: '<n>', summary: 'Page number, default 1' },
+      offset: {
+        type: 'string',
+        value: '<n>',
+        summary: 'Records to skip first, instead of --page',
+      },
       full: {
         type: 'boolean',
         summary: 'Every non-empty field, no size limit',
@@ -144,13 +150,14 @@ export const COMMANDS: readonly CommandSpec[] = [
         type: 'string',
         required: true,
         value: '<time>',
-        summary: 'From when: 7d, 24h, 2026-11-01 or a full UTC time',
+        summary:
+          'From when: 7d, 24h, 2026-11-01 or a full UTC time such as 2026-11-01T06:00:00Z',
       },
       where: {
         type: 'string',
         multiple: true,
         value: '<F=V>',
-        summary: 'Filter, as for get',
+        summary: "Filter, as for get; times are Priority's local time",
       },
       fields: { type: 'string', value: '<A,B>', summary: 'Columns to show' },
       limit: {
@@ -159,6 +166,11 @@ export const COMMANDS: readonly CommandSpec[] = [
         summary: 'Records per page, default 20, at most 500',
       },
       page: { type: 'string', value: '<n>', summary: 'Page number, default 1' },
+      offset: {
+        type: 'string',
+        value: '<n>',
+        summary: 'Records to skip first, instead of --page',
+      },
       full: {
         type: 'boolean',
         summary: 'Every non-empty field, no size limit',
@@ -211,7 +223,8 @@ export const COMMANDS: readonly CommandSpec[] = [
         type: 'string',
         multiple: true,
         value: '<F=V>',
-        summary: 'A field of the new record',
+        summary:
+          "A field of the new record; times are Priority's local (company) time",
       },
       line: {
         type: 'string',
@@ -244,7 +257,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         type: 'string',
         multiple: true,
         value: '<F=V>',
-        summary: 'A field to change',
+        summary: "A field to change; times are Priority's local (company) time",
       },
       'dry-run': {
         type: 'boolean',
@@ -288,7 +301,8 @@ export const COMMANDS: readonly CommandSpec[] = [
         type: 'string',
         multiple: true,
         value: '<F=V>',
-        summary: 'A field of the line to change',
+        summary:
+          "A field of the line to change; times are Priority's local (company) time",
       },
       'dry-run': {
         type: 'boolean',

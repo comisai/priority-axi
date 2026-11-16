@@ -3,11 +3,12 @@
 import type { CommandInput, Token, Values } from '../cli/table.ts';
 import { readSettings, type Settings } from '../config.ts';
 import { AxiError, usage } from '../errors.ts';
-import { type Answer, rowsOf, send, stringValue } from '../http.ts';
+import { type Answer, rowsOf, send, stringValue, timeLeft } from '../http.ts';
 import {
   type CompanyCheck,
   cacheDir,
   type IndexSource,
+  LOCK_WAIT_MS,
   type LoadedIndex,
   loadIndex,
   readCompany,
@@ -111,7 +112,10 @@ export async function screenIndex(s: Session): Promise<LoadedIndex> {
   const cached = readIndex(s.dir);
   if (cached && !staleReason(cached, { now })) return { index: cached };
   await checkCompany(s, false);
-  return loadIndex(s.dir, indexSource(s), { now });
+  return loadIndex(s.dir, indexSource(s), {
+    now,
+    lockWaitMs: Math.min(LOCK_WAIT_MS, timeLeft(s.settings, s.input.io.http)),
+  });
 }
 
 /** A note for output when this command had to build the index first. */

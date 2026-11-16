@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { AxiError, classify, priorityMessage } from '../../src/errors.ts';
+import {
+  AxiError,
+  classify,
+  formLine,
+  priorityMessage,
+} from '../../src/errors.ts';
 
 const answer = (
   status: number,
@@ -177,5 +182,97 @@ describe('priorityMessage', () => {
     assert.equal(priorityMessage(priority('odata says')), 'odata says');
     assert.equal(priorityMessage(undefined, '<html>oops</html>'), undefined);
     assert.equal(priorityMessage({ FORM: {} }), undefined);
+  });
+});
+
+describe('error wording for writes and lockouts', () => {
+  it('says not to retry a failed sign-in, and names the lockout', () => {
+    const e = classify(answer(401));
+    assert.equal(e?.code, 'auth_failed');
+    assert.match(
+      e?.message ?? '',
+      /Do not retry: after 3 failed sign-ins Priority locks the API user for 30 minutes/,
+    );
+  });
+
+  it('names a possible lockout on a 429 without Retry-After', () => {
+    const bare = classify(answer(429));
+    assert.match(
+      bare?.message ?? '',
+      /locked the API user after failed sign-ins/,
+    );
+    assert.match(bare?.message ?? '', /do not retry in a loop/);
+    const timed = classify(answer(429, undefined, { 'Retry-After': '30' }));
+    assert.doesNotMatch(timed?.message ?? '', /locked/);
+  });
+
+  it("blames the record, not the screen, for a 404 on a write, with Priority's words", () => {
+    const e = classify(answer(404, priority('הרשומה לא נמצאה')), {
+      screen: 'ORDERS',
+      method: 'PATCH',
+    });
+    assert.equal(e?.code, 'not_found');
+    assert.match(
+      e?.message ?? '',
+      /^Priority found no such ORDERS record or line \(404\)/,
+    );
+    assert.doesNotMatch(e?.message ?? '', /priority-axi screens/);
+    assert.equal(e?.fields.priority, 'הרשומה לא נמצאה');
+    const read = classify(answer(404), { screen: 'ORDERS', method: 'GET' });
+    assert.match(
+      read?.message ?? '',
+      /Check the name with `priority-axi screens`/,
+    );
+  });
+
+  it('does not tell an update that conflicts to read instead of creating', () => {
+    const e = classify(answer(409, priority('conflict')), {
+      screen: 'ORDERS',
+      method: 'PATCH',
+    });
+    assert.equal(e?.code, 'priority_rejected');
+    assert.match(
+      e?.message ?? '',
+      /conflict \(409\): conflict\. Read the record/,
+    );
+    assert.doesNotMatch(e?.message ?? '', /creating/);
+    const create = classify(answer(409), { screen: 'ORDERS', method: 'POST' });
+    assert.equal(create?.code, 'already_exists');
+  });
+
+  it("gives the Gate's policy refusal a sentence an agent can act on", () => {
+    const e = classify(
+      answer(403, undefined, { 'Comis-Refusal': 'policy_refused' }),
+    );
+    assert.equal(e?.code, 'refused');
+    assert.match(e?.message ?? '', /A reader workbench cannot write/);
+  });
+});
+
+describe('formLine', () => {
+  it("reads the line Priority's form errors name, in Hebrew or English", () => {
+    const form = (text: unknown) => ({ FORM: { InterfaceErrors: text } });
+    assert.equal(formLine(form({ text: 'שורה 2- מק"ט X: לא קיים' })), 2);
+    assert.equal(formLine(form({ text: 'Line 3 - Part X does not exist' })), 3);
+    assert.equal(
+      formLine(form([{ text: 'שורה 4- a' }, { text: 'שורה 2- b' }])),
+      2,
+    );
+    assert.equal(formLine(form({ text: "שורה 1- - חסר מס' חברה" })), 1);
+    assert.equal(formLine(form({ text: 'no line here' })), undefined);
+    assert.equal(
+      formLine(form([{ text: 'שורה 2- a' }, { text: 'other' }])),
+      undefined,
+    );
+    assert.equal(formLine(priority('שורה 2- in an OData message')), undefined);
+  });
+
+  it('is carried on a 4xx refusal, without printing it', () => {
+    const e = classify(
+      answer(400, { FORM: { InterfaceErrors: { text: 'שורה 2- bad part' } } }),
+    );
+    assert.equal(e?.code, 'priority_rejected');
+    assert.equal(e?.formLine, 2);
+    assert.equal(e?.fields.line, undefined);
   });
 });
