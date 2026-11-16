@@ -190,6 +190,17 @@ describe('get', () => {
     ]);
     assert.match(range.out, /^summary: 2 records from ORDERS\n/);
     assert.match(range.out, /\n {2}SO26000101,[^\n]*\n {2}SO26000102,/);
+    // CURDATE is a date field, which Priority compares by day alone (live, 23.1).
+    const late = await run([
+      'get',
+      'ORDERS',
+      '--where',
+      'CURDATE>=2026-10-03T23:00:00+02:00',
+      '--where',
+      'CURDATE<2026-10-04',
+    ]);
+    assert.match(late.out, /^summary: 1 record from ORDERS\n/);
+    assert.match(late.out, /\n {2}SO26000101,/);
   });
 
   it('states an empty result with exit 0', async () => {

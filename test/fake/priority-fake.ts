@@ -362,10 +362,20 @@ function compare(a: unknown, b: unknown): number {
   return String(a ?? '').localeCompare(String(b ?? ''));
 }
 
-function matches(row: Row, e: Expr, fields: Set<string>): boolean {
+/**
+ * Whether a row matches. A field whose DateType is Date is compared by its day
+ * alone, as on QA (23.1): CURDATE ge 2026-11-08T01:00:00Z matches a CURDATE of
+ * 2026-11-08.
+ */
+function matches(
+  row: Row,
+  e: Expr,
+  fields: Set<string>,
+  days: Set<string> = new Set(),
+): boolean {
   if (e.kind === 'and' || e.kind === 'or') {
-    const left = matches(row, e.left, fields);
-    const right = matches(row, e.right, fields);
+    const left = matches(row, e.left, fields, days);
+    const right = matches(row, e.right, fields, days);
     return e.kind === 'and' ? left && right : left || right;
   }
   if (!fields.has(e.field))
@@ -377,7 +387,13 @@ function matches(row: Row, e: Expr, fields: Set<string>): boolean {
     return e.op === 'eq'
       ? v === null || v === undefined
       : !(v === null || v === undefined);
-  const c = compare(v, e.value);
+  const c =
+    days.has(e.field) && e.value instanceof WallClock
+      ? compare(
+          typeof v === 'string' ? v.slice(0, 10) : v,
+          new WallClock(e.value.digits.slice(0, 10)),
+        )
+      : compare(v, e.value);
   return (
     { eq: c === 0, ne: c !== 0, gt: c > 0, ge: c >= 0, lt: c < 0, le: c <= 0 }[
       e.op
@@ -779,7 +795,12 @@ export async function startFake(options: FakeOptions = {}) {
       const filter = p.get('$filter');
       if (filter) {
         const expr = parseFilter(filter);
-        list = list.filter((r) => matches(r, expr, fields));
+        const days = new Set(
+          fieldsOf(typeName)
+            .filter(([, d]) => d['@Priority.OData.DateType'] === 'Date')
+            .map(([n]) => n),
+        );
+        list = list.filter((r) => matches(r, expr, fields, days));
       }
       const order = p.get('$orderby');
       if (order) {

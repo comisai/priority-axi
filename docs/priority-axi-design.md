@@ -379,6 +379,7 @@ The same command without `--dry-run`:
   - Shown as `YYYY-MM-DD` for date fields (`DateType: Date`).
   - Otherwise as ISO 8601 with the offset the server sent.
   - Dates and times in `--where`, `--set` and `--json-file` are Priority's local (company) time. Their wall-clock digits are sent exactly as given, with `Z` completing the literal; an offset is dropped, never converted. Priority 23.1 compares and stores only the digits and ignores the offset (live, 2026-11-16: `CURDATE eq 2026-11-08T00:00:00Z`, `+02:00` and `-05:00` all matched, and a `DUEDATE` sent as `2026-11-19T23:00:00Z` was stored as 2026-11-19).
+  - A date field (`DateType: Date`, such as `CURDATE` and `DUEDATE`) is compared by its day alone: live, `CURDATE>=2026-11-08T01:00` matched the orders of the 8th. The fake does the same.
   - `--since` alone is converted to UTC with `Z`, as Priority recommends for `$since`, which honours the offset.
 - **Sub-screens:** `--with ORDERITEMS` expands `ORDERITEMS_SUBFORM` and prints it as a nested TOON table under each record, ordered by the line key (`$orderby` inside `$expand`, and again on the client), since Priority sends lines in its own order.
 
