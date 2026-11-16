@@ -10,6 +10,8 @@ export interface Settings {
   company: string;
   user: string;
   password: string;
+  /** COMIS_DEADLINE: when the command is killed, in epoch milliseconds. */
+  deadline?: number;
 }
 
 export interface SettingFlags {
@@ -104,13 +106,25 @@ export function readSettings(
       'The username (--user or PRIORITY_USER) must not contain a colon or control characters.',
     );
   }
-  return {
+  const settings: Settings = {
     origin,
     ini: segment(ini, 'The ini (--ini or PRIORITY_INI)'),
     company: segment(company, 'The company (--company or PRIORITY_COMPANY)'),
     user,
     password,
   };
+  // Comis sets COMIS_DEADLINE for every shell call; the command is killed then.
+  const deadline = env.COMIS_DEADLINE;
+  if (deadline !== undefined && deadline !== '') {
+    const n = Number(deadline);
+    if (!/^[1-9][0-9]*$/.test(deadline) || !Number.isSafeInteger(n)) {
+      throw usage(
+        'COMIS_DEADLINE must be a time in epoch milliseconds, a positive whole number.',
+      );
+    }
+    settings.deadline = n;
+  }
+  return settings;
 }
 
 export function serviceRoot(settings: Settings): string {

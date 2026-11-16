@@ -57,7 +57,7 @@ Until then, reads end with `code: screen_not_enabled`. The home view, `screens`,
 priority-axi                                 home view: connection, version, company, next steps
 priority-axi screens [<text>]                find screens by name or description
 priority-axi fields <SCREEN> [--sub <SUB>]   a screen's fields, key and sub-screens
-priority-axi get <SCREEN> [--where F=V]... [--fields A,B] [--with <SUB>]... [--sort F[:desc]] [--limit N] [--page N]
+priority-axi get <SCREEN> [--where F=V]... [--fields A,B] [--with <SUB>]... [--sort F[:desc]] [--limit N] [--page N | --offset N]
 priority-axi show <SCREEN> <key> [--with <SUB>]...
 priority-axi changes <SCREEN> --since 7d     recent changes, on screens with a BPM status workflow
 priority-axi find <SCREEN> <words>...        records by words in their name or description
@@ -111,6 +111,8 @@ priority-axi update-line ORDERS SO26000102 ORDERITEMS KLINE=1 --set TQUANT=3 --d
 
 `--where` takes `F=V`, `F!=V`, `F>V`, `F>=V`, `F<V` and `F<=V`. Values are typed from the screen's metadata, so you never write OData quotes. `--filter` passes raw OData for anything else the server supports.
 
+**Dates and times are Priority's local (company) time,** in `--where`, `--set` and `--json-file`: write `2026-11-20` or `2026-11-20T08:00`. priority-axi sends the digits as written. Priority ignores an offset such as `+02:00`, so priority-axi drops it and never converts the time to UTC. `changes --since` is the exception: it takes UTC, such as `2026-11-01T06:00:00Z`, or `7d` and `24h`.
+
 Priority answers 501 to `contains` and `startswith`. For text that starts with `ABC`, use a range: `--where 'F>=ABC' --where 'F<ABD'`.
 
 Always filter large document screens such as orders and invoices. Without a filter, Priority goes through every record before it answers, even when you ask for one.
@@ -127,28 +129,29 @@ Records that are not in use are left out unless you pass `--all`. When no record
 
 ## Output and errors
 
-- **Lists** say how many records they show and whether more exist. Priority reports no totals.
+- **Lists** say how many records they show and whether more exist. Priority reports no totals. When the size limit drops records, the summary says `N of M shown`, and the next-page hint continues with `--offset` at the first record not shown.
 - **Size:** long values are cut at 500 characters, and the whole output at about 4,000. `--full` lifts both limits, up to 256 KB.
 - **Text safety:** invisible and bidirectional control characters are shown as `\uXXXX`, and values that look like credentials are withheld. Remarks, which Priority stores as HTML, are shown as plain text.
 - **Errors** print `message`, `code` and `usage` on stdout.
 - **Exit codes:** 0 on success, 1 on an error, 2 on a usage error.
 
-| Code                                               | Meaning                                                                                   |
-| -------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `usage`                                            | The command line is wrong; `usage` shows the right form                                   |
-| `not_connected`, `missing_setting`                 | A setting is missing                                                                      |
-| `auth_failed`                                      | Priority refused the username or password                                                 |
-| `company_not_found`                                | The API user cannot reach that company                                                    |
-| `screen_not_enabled`                               | The screen is not in Limited Access / API Forms                                           |
-| `not_found`                                        | No record has that key                                                                    |
-| `already_exists`                                   | A create clashed with an existing key                                                     |
-| `priority_rejected`                                | Priority refused the request; its own message is shown                                    |
-| `unsupported_query`                                | Priority cannot run that query                                                            |
-| `rate_limited`                                     | Too many requests; wait and try again                                                     |
-| `held_for_approval`, `reconnect_needed`, `refused` | Inside Comis: the owner must approve, the owner must reconnect, or the Gate refused       |
-| `unreachable`, `priority_error`                    | The server could not be reached, or it failed                                             |
-| `output_too_large`                                 | Even `--full` would exceed 256 KB; narrow the query                                       |
-| `internal_error`                                   | A bug in priority-axi; please [report it](https://github.com/comisai/priority-axi/issues) |
+| Code                                               | Meaning                                                                                                   |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `usage`                                            | The command line is wrong; `usage` shows the right form                                                   |
+| `not_connected`, `missing_setting`                 | A setting is missing                                                                                      |
+| `auth_failed`                                      | Priority refused the username or password                                                                 |
+| `company_not_found`                                | The API user cannot reach that company                                                                    |
+| `screen_not_enabled`                               | The screen is not in Limited Access / API Forms                                                           |
+| `not_found`                                        | No record has that key                                                                                    |
+| `already_exists`                                   | A create clashed with an existing key                                                                     |
+| `priority_rejected`                                | Priority refused the request; its own message is shown                                                    |
+| `partly_saved`                                     | Priority saved a new record but refused one of its lines; do not create it again                          |
+| `unsupported_query`                                | Priority cannot run that query                                                                            |
+| `rate_limited`                                     | Too many requests; wait and try again                                                                     |
+| `held_for_approval`, `reconnect_needed`, `refused` | Inside Comis: the owner must approve, the owner must reconnect, or the Gate refused                       |
+| `unreachable`, `priority_error`                    | The server could not be reached, did not answer in time, or failed; after a write, it may have been saved |
+| `output_too_large`                                 | Even `--full` would exceed 256 KB; narrow the query                                                       |
+| `internal_error`                                   | A bug in priority-axi; please [report it](https://github.com/comisai/priority-axi/issues)                 |
 
 ## Writes
 
@@ -156,6 +159,9 @@ Records that are not in use are left out unless you pass `--all`. When no record
 
 - **Dry run:** `--dry-run` shows the request and how many API transactions it will cost: one per record and one per line.
 - **Sent once:** a write is never retried. Inside Comis, the Gate holds it until the owner approves it.
+- **When the answer is lost:** if the connection breaks or times out after a write was sent, or Priority answers with a server error, the message says Priority may have saved it. Check with `show` or `get`, and do not send it again blindly.
+- **Partly saved creates:** Priority saves a new record and its lines one by one, with no rollback. When it refuses a line, the record is already saved without it. priority-axi reports `partly_saved`, names the saved record (or the `get` that finds it), and points to `add-line`. Never create it again.
+- **Time limits:** inside Comis, `COMIS_DEADLINE` bounds every command. Reads stop one second before it and say to run the command from a worker. A write is refused without sending when fewer than 50 s remain, since the owner's approval can take 45 s. The first index build and a cold `find` catalog each take about 30 s.
 - **Updates name the record in the path:** `PATCH ORDERS('SO26000102')`, `POST ORDERS('SO26000102')/ORDERITEMS_SUBFORM` and `PATCH ORDERS('SO26000102')/ORDERITEMS_SUBFORM(KLINE=1)`. A key value is a typed literal; it may not hold a slash, a percent sign, a backslash, a control character or two dots in a row, and the record's key fields cannot be changed. Deleting is not supported.
 - **Fields the metadata does not mark:** Priority may require them, and then refuses with `priority_rejected` and its own message.
 

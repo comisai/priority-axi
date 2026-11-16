@@ -168,6 +168,40 @@ describe('readSettings', () => {
     );
   });
 
+  it('reads COMIS_DEADLINE as epoch milliseconds, as ituran-axi does', () => {
+    assert.equal(
+      readSettings({
+        ...base,
+        PRIORITY_URL: 'https://erp.example.com',
+        PRIORITY_COMPANY: 'demo',
+      }).deadline,
+      undefined,
+    );
+    const s = readSettings({
+      ...base,
+      PRIORITY_URL: 'https://erp.example.com',
+      PRIORITY_COMPANY: 'demo',
+      COMIS_DEADLINE: '1800000000000',
+    });
+    assert.equal(s.deadline, 1_800_000_000_000);
+    for (const bad of ['soon', '-5', '1.5', '0', '1e12']) {
+      assert.throws(
+        () =>
+          readSettings({
+            ...base,
+            PRIORITY_URL: 'https://erp.example.com',
+            PRIORITY_COMPANY: 'demo',
+            COMIS_DEADLINE: bad,
+          }),
+        (e: unknown) =>
+          e instanceof AxiError &&
+          e.code === 'usage' &&
+          /COMIS_DEADLINE must be a time in epoch milliseconds/.test(e.message),
+        bad,
+      );
+    }
+  });
+
   it('never puts the password into an error message', () => {
     try {
       readSettings({

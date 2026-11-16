@@ -28,6 +28,12 @@ export interface FakeOptions {
   port?: number;
   /** Extra generated LOGPART records, to exercise paging in find. */
   parts?: number;
+  /**
+   * Lose the answer: 'drop' applies each write, then closes the connection
+   * without answering; 'stall-writes' applies it and never answers;
+   * 'stall-reads' never answers a read of a screen's records.
+   */
+  lose?: 'drop' | 'stall-writes' | 'stall-reads';
 }
 
 export interface FakeState {
@@ -275,7 +281,7 @@ function parseFilter(text: string): Expr {
     if (tok === 'null') return null;
     if (tok === 'true' || tok === 'false') return tok === 'true';
     if (/^-?\d+(\.\d+)?$/.test(tok)) return Number(tok);
-    if (/^\d{4}-\d{2}-\d{2}T/.test(tok)) return new Date(tok);
+    if (/^\d{4}-\d{2}-\d{2}T/.test(tok)) return new WallClock(tok);
     throw new FilterError(400, `Syntax error at '${tok}'`);
   };
   const primary = (): Expr => {
@@ -329,19 +335,47 @@ function parseFilter(text: string): Expr {
   return expr;
 }
 
+/**
+ * A date literal in $filter. Like QA (23.1), the fake compares only the
+ * wall-clock digits and ignores the offset: CURDATE eq 2026-11-08T00:00:00Z,
+ * ...+02:00 and ...-05:00 all match a CURDATE stored as 2026-11-08T00:00:00+02:00.
+ */
+class WallClock {
+  readonly digits: string;
+  constructor(text: string) {
+    this.digits = wallClock(text);
+  }
+}
+
+/** YYYY-MM-DDTHH:MM:SS of a stored or sent date, without its offset. */
+export function wallClock(text: string): string {
+  const m = /^(\d{4}-\d{2}-\d{2})(?:T(\d{2}:\d{2})(:\d{2})?)?/.exec(text);
+  return m ? `${m[1]}T${m[2] ?? '00:00'}${m[3] ?? ':00'}` : '';
+}
+
 function compare(a: unknown, b: unknown): number {
-  if (b instanceof Date) {
-    const t = typeof a === 'string' ? Date.parse(a) : Number.NaN;
-    return t - b.getTime();
+  if (b instanceof WallClock) {
+    const t = typeof a === 'string' ? wallClock(a) : '';
+    return t < b.digits ? -1 : t > b.digits ? 1 : 0;
   }
   if (typeof a === 'number' && typeof b === 'number') return a - b;
   return String(a ?? '').localeCompare(String(b ?? ''));
 }
 
-function matches(row: Row, e: Expr, fields: Set<string>): boolean {
+/**
+ * Whether a row matches. A field whose DateType is Date is compared by its day
+ * alone, as on QA (23.1): CURDATE ge 2026-11-08T01:00:00Z matches a CURDATE of
+ * 2026-11-08.
+ */
+function matches(
+  row: Row,
+  e: Expr,
+  fields: Set<string>,
+  days: Set<string> = new Set(),
+): boolean {
   if (e.kind === 'and' || e.kind === 'or') {
-    const left = matches(row, e.left, fields);
-    const right = matches(row, e.right, fields);
+    const left = matches(row, e.left, fields, days);
+    const right = matches(row, e.right, fields, days);
     return e.kind === 'and' ? left && right : left || right;
   }
   if (!fields.has(e.field))
@@ -353,7 +387,13 @@ function matches(row: Row, e: Expr, fields: Set<string>): boolean {
     return e.op === 'eq'
       ? v === null || v === undefined
       : !(v === null || v === undefined);
-  const c = compare(v, e.value);
+  const c =
+    days.has(e.field) && e.value instanceof WallClock
+      ? compare(
+          typeof v === 'string' ? v.slice(0, 10) : v,
+          new WallClock(e.value.digits.slice(0, 10)),
+        )
+      : compare(v, e.value);
   return (
     { eq: c === 0, ne: c !== 0, gt: c > 0, ge: c >= 0, lt: c < 0, le: c <= 0 }[
       e.op
@@ -371,7 +411,7 @@ function full(type: string, row: Row): Row {
 
 function parseExpand(
   text: string,
-): Array<{ nav: string; select?: string[]; top?: number }> {
+): Array<{ nav: string; select?: string[]; top?: number; orderby?: string }> {
   const parts: string[] = [];
   let depth = 0;
   let current = '';
@@ -397,6 +437,7 @@ function parseExpand(
       nav: m[1],
       ...(opts.$select ? { select: String(opts.$select).split(',') } : {}),
       ...(opts.$top ? { top: Number(opts.$top) } : {}),
+      ...(opts.$orderby ? { orderby: String(opts.$orderby) } : {}),
     };
   });
 }
@@ -427,7 +468,17 @@ function shape(
           : null;
       continue;
     }
-    const lines = Array.isArray(value) ? (value as Row[]) : [];
+    const lines = Array.isArray(value) ? (value as Row[]).slice() : [];
+    // Without $orderby, lines come in the order they are stored, as on QA.
+    const by = ex.orderby?.split(',') ?? [];
+    if (by.length)
+      lines.sort((a, b) => {
+        for (const k of by) {
+          const c = compare(a[k], b[k]);
+          if (c) return c;
+        }
+        return 0;
+      });
     out[ex.nav] = lines
       .slice(0, ex.top ?? lines.length)
       .map((l) => shape(subType, l, ex.select, []));
@@ -459,6 +510,10 @@ export async function startFake(options: FakeOptions = {}) {
       body?: unknown,
       headers: Record<string, string> = {},
     ) => {
+      if (req.method === 'POST' || req.method === 'PATCH') {
+        if (options.lose === 'drop') return void req.socket.destroy();
+        if (options.lose === 'stall-writes') return;
+      }
       const text = body === undefined ? '' : JSON.stringify(body);
       res.writeHead(status, {
         ...(text
@@ -568,7 +623,16 @@ export async function startFake(options: FakeOptions = {}) {
       const row = (state.rows[set] ?? []).find((r) =>
         Object.entries(wanted).every(([k, v]) => r[k] === v),
       );
-      if (!row) return err(404, 'הרשומה לא נמצאה');
+      // QA (23.1) answers 400, not 404, for a missing record or line.
+      if (!row)
+        return send(400, {
+          FORM: {
+            '@TYPE': set,
+            InterfaceErrors: {
+              text: `שורה 1- ${setKey[0] ?? 'מפתח'} ${String(Object.values(wanted)[0])}: לא קיימת רשומה כזו`,
+            },
+          },
+        });
       let body = '';
       for await (const chunk of req) body += chunk;
       const change = JSON.parse(body) as Row;
@@ -619,7 +683,8 @@ export async function startFake(options: FakeOptions = {}) {
       const line = lines.find((l) =>
         Object.entries(lineKey).every(([k, v]) => l[k] === v),
       );
-      if (!line) return err(404, 'השורה לא נמצאה');
+      if (!line)
+        return err(400, 'A record with the specified key was not found');
       Object.assign(line, change);
       row._changed = new Date().toISOString();
       return send(200, full(lineType, line));
@@ -681,12 +746,35 @@ export async function startFake(options: FakeOptions = {}) {
               ? `SO26000${200 + state.posts}`
               : `N${1000 + state.posts}`;
         record._changed = new Date().toISOString();
+        // A deep insert is saved line by line, without rollback (live, 23.1):
+        // a refused order line leaves the order and the lines before it saved,
+        // and the 400 names the line (the record is line 1) but no key.
+        const items = record.ORDERITEMS_SUBFORM;
+        const bad = Array.isArray(items)
+          ? items.findIndex((l) =>
+              /^NOSUCH/.test(String((l as Row).PARTNAME ?? '')),
+            )
+          : -1;
+        if (path === 'ORDERS' && Array.isArray(items) && bad >= 0) {
+          record.ORDERITEMS_SUBFORM = items.slice(0, bad);
+          rows.push(record);
+          return send(400, {
+            '?xml': { '@version': '1.0', '@encoding': 'utf-8' },
+            FORM: {
+              '@TYPE': 'ORDERS',
+              InterfaceErrors: {
+                text: `שורה ${bad + 2}- מק"ט ${String((items[bad] as Row).PARTNAME)}: ערך זה לא קיים במסך פריטים`,
+              },
+            },
+          });
+        }
         rows.push(record);
         return send(201, full(typeName, record));
       }
 
       state.gets++;
       state.lastQuery = url.search;
+      if (options.lose === 'stall-reads') return;
       if (!throttled) {
         throttled = true;
         return send(429, undefined, { 'Retry-After': '1' });
@@ -707,7 +795,12 @@ export async function startFake(options: FakeOptions = {}) {
       const filter = p.get('$filter');
       if (filter) {
         const expr = parseFilter(filter);
-        list = list.filter((r) => matches(r, expr, fields));
+        const days = new Set(
+          fieldsOf(typeName)
+            .filter(([, d]) => d['@Priority.OData.DateType'] === 'Date')
+            .map(([n]) => n),
+        );
+        list = list.filter((r) => matches(r, expr, fields, days));
       }
       const order = p.get('$orderby');
       if (order) {
@@ -769,7 +862,11 @@ export async function startFake(options: FakeOptions = {}) {
     port,
     root: `http://127.0.0.1:${port}/odata/Priority/tabula.ini/${company}`,
     state,
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      }),
   };
 }
 

@@ -16,7 +16,7 @@ import {
 import { recordSegment } from '../odata.ts';
 import { defaultColumns, tableRow } from '../output/shape.ts';
 import { render } from '../output/toon.ts';
-import { open, screenIndex, strings, tokenLine } from './common.ts';
+import { open, screenIndex, shellWord, strings, tokenLine } from './common.ts';
 import { assign } from './create.ts';
 
 type Body = Record<string, unknown>;
@@ -94,7 +94,7 @@ async function write(
         : null,
     },
     [
-      `Run \`priority-axi show ${w.screen.name} ${keyOf(input, 1, 'the key')} --with <SUB>\` to read it back`,
+      `Run \`priority-axi show ${w.screen.name} ${shellWord(keyOf(input, 1, 'the key'))} --with <SUB>\` to read it back`,
     ],
   );
 }

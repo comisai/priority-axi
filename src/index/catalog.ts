@@ -195,7 +195,7 @@ export function layout(
   };
 }
 
-function catalogPath(dir: string, screen: string, sub?: string): string {
+export function catalogPath(dir: string, screen: string, sub?: string): string {
   return join(dir, 'find', `${screen}${sub ? `.${sub}` : ''}.json`);
 }
 

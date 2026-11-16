@@ -4,10 +4,13 @@
 
 import { createHash, randomBytes } from 'node:crypto';
 import {
+  closeSync,
   mkdirSync,
+  openSync,
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
@@ -43,6 +46,80 @@ export function writeJsonAtomic(path: string, value: unknown): void {
   } catch (error) {
     rmSync(tmp, { force: true });
     throw error;
+  }
+}
+
+// ---------- an advisory lock around slow builds ----------
+
+/** A lock older than this is from a run that died; it is taken over. */
+export const LOCK_STALE_MS = 5 * 60 * 1000;
+/** How long to wait for another run's build before building anyway. */
+export const LOCK_WAIT_MS = 90_000;
+const LOCK_POLL_MS = 250;
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+function stale(path: string, now: number): boolean {
+  try {
+    const pid = Number(readFileSync(path, 'utf8').split(' ')[0]);
+    if (Number.isSafeInteger(pid) && pid > 0 && !alive(pid)) return true;
+    return now - statSync(path).mtimeMs > LOCK_STALE_MS;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Run a build while holding an advisory lock file, so that concurrent cold
+ * runs on one cache wait for one download instead of each pulling the same
+ * metadata or catalog. `ready` is checked after waiting: when another run
+ * built it meanwhile, its result is used. The lock is only a courtesy: when it
+ * cannot be taken within `waitMs`, or the cache cannot be written, the build
+ * runs anyway.
+ */
+export async function withBuildLock<T>(
+  path: string,
+  ready: () => T | undefined,
+  build: () => Promise<T>,
+  waitMs: number = LOCK_WAIT_MS,
+): Promise<T> {
+  const until = Date.now() + Math.max(0, waitMs);
+  let held = false;
+  let waited = false;
+  for (;;) {
+    try {
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+      const fd = openSync(path, 'wx', 0o600);
+      writeFileSync(fd, `${process.pid} ${new Date().toISOString()}`);
+      closeSync(fd);
+      held = true;
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') break;
+      if (stale(path, Date.now())) {
+        rmSync(path, { force: true });
+        continue;
+      }
+      if (Date.now() >= until) break;
+      waited = true;
+      await new Promise((resolve) => setTimeout(resolve, LOCK_POLL_MS));
+    }
+  }
+  try {
+    if (waited || held) {
+      const done = ready();
+      if (done !== undefined) return done;
+    }
+    return await build();
+  } finally {
+    if (held) rmSync(path, { force: true });
   }
 }
 
@@ -100,16 +177,42 @@ export interface LoadedIndex {
 export async function loadIndex(
   dir: string,
   source: IndexSource,
-  opts: { now: Date; refresh?: boolean; liveVersion?: string },
+  opts: {
+    now: Date;
+    refresh?: boolean;
+    liveVersion?: string;
+    lockWaitMs?: number;
+  },
 ): Promise<LoadedIndex> {
   const cached = readIndex(dir);
   const reason = staleReason(cached, opts);
   if (cached && !reason) return { index: cached };
-  const version = opts.liveVersion ?? (await source.fetchVersion());
-  const { csdl, bytes, ms } = await source.fetchMetadata();
-  const index = buildIndex(csdl, { version, builtAt: opts.now.toISOString() });
-  writeJsonAtomic(join(dir, 'index.json'), index);
-  return { index, rebuilt: { reason: reason ?? 'missing', bytes, ms } };
+  return withBuildLock(
+    join(dir, 'index.lock'),
+    () => {
+      // Another run built it while this one waited. A refresh still rebuilds.
+      const built = readIndex(dir);
+      if (
+        !built ||
+        opts.refresh ||
+        built.builtAt === cached?.builtAt ||
+        staleReason(built, { ...opts, refresh: false })
+      )
+        return undefined;
+      return { index: built };
+    },
+    async () => {
+      const version = opts.liveVersion ?? (await source.fetchVersion());
+      const { csdl, bytes, ms } = await source.fetchMetadata();
+      const index = buildIndex(csdl, {
+        version,
+        builtAt: opts.now.toISOString(),
+      });
+      writeJsonAtomic(join(dir, 'index.json'), index);
+      return { index, rebuilt: { reason: reason ?? 'missing', bytes, ms } };
+    },
+    opts.lockWaitMs,
+  );
 }
 
 // ---------- what the AXI has seen per screen ----------

@@ -9,10 +9,12 @@
 
 import type { CommandInput } from '../cli/table.ts';
 import { usage } from '../errors.ts';
-import { rowsOf } from '../http.ts';
+import { rowsOf, timeLeft } from '../http.ts';
 import { resolveScreen, resolveSub } from '../index/build.ts';
+import { LOCK_WAIT_MS, withBuildLock } from '../index/cache.ts';
 import {
   type Catalog,
+  catalogPath,
   layout,
   pullCatalog,
   readCatalog,
@@ -61,27 +63,38 @@ export async function find(input: CommandInput): Promise<string> {
   const label = sub ? `${screen.name} > ${sub.name}` : screen.name;
   const now = input.io.now();
 
-  let catalog: Catalog | undefined =
+  const cached =
     v.refresh === true
       ? undefined
       : readCatalog(s.dir, screen.name, sub?.name, lay.columns, now);
   let pulled: string | undefined;
-  if (!catalog) {
-    const started = performance.now();
-    catalog = await pullCatalog(
-      screen,
-      sub,
-      lay,
-      async (query) => rowsOf(await readScreen(s, screen.name, query)),
-      now,
-    );
-    writeCatalog(s.dir, catalog);
-    const seconds = Math.max(
-      1,
-      Math.round((performance.now() - started) / 1000),
-    );
-    pulled = `built now: ${catalog.rows.length} ${sub ? 'lines' : 'records'} from Priority in ${seconds} s`;
-  }
+  const catalog: Catalog =
+    cached ??
+    (await withBuildLock(
+      `${catalogPath(s.dir, screen.name, sub?.name)}.lock`,
+      () =>
+        v.refresh === true
+          ? undefined
+          : readCatalog(s.dir, screen.name, sub?.name, lay.columns, now),
+      async () => {
+        const started = performance.now();
+        const built = await pullCatalog(
+          screen,
+          sub,
+          lay,
+          async (query) => rowsOf(await readScreen(s, screen.name, query)),
+          now,
+        );
+        writeCatalog(s.dir, built);
+        const seconds = Math.max(
+          1,
+          Math.round((performance.now() - started) / 1000),
+        );
+        pulled = `built now: ${built.rows.length} ${sub ? 'lines' : 'records'} from Priority in ${seconds} s`;
+        return built;
+      },
+      Math.min(LOCK_WAIT_MS, timeLeft(s.settings, input.io.http)),
+    ));
 
   const at = (name: string) => catalog.columns.indexOf(name);
   const statusAt = lay.status.map(at).filter((i) => i >= 0);

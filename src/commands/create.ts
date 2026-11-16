@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import type { CommandInput } from '../cli/table.ts';
 import { serviceRoot } from '../config.ts';
 import { AxiError, usage } from '../errors.ts';
-import { send } from '../http.ts';
+import { rowsOf, send } from '../http.ts';
 import {
   type Field,
   type Resolved,
@@ -16,11 +16,19 @@ import {
   type ScreenType,
 } from '../index/build.ts';
 import { recordReach } from '../index/cache.ts';
-import { parseWhere, screenSegment, utc } from '../odata.ts';
+import {
+  literal,
+  localTime,
+  parseWhere,
+  queryString,
+  screenSegment,
+} from '../odata.ts';
 import { defaultColumns, tableRow } from '../output/shape.ts';
 import { render } from '../output/toon.ts';
 import {
   open,
+  readScreen,
+  type Session,
   screenIndex,
   shellWord,
   str,
@@ -72,7 +80,7 @@ export function typedValue(field: Field, raw: string, where: string): unknown {
       throw usage(`${field.name} is true or false.`);
     return raw === 'true';
   }
-  if (field.type === 'DateTimeOffset') return utc(raw, field.name);
+  if (field.type === 'DateTimeOffset') return localTime(raw, field.name);
   throw usage(`${field.name} has type ${field.type}, which create cannot set.`);
 }
 
@@ -215,6 +223,83 @@ function assemble(body: Body, lines: Line[]): Body {
   return out;
 }
 
+/**
+ * Priority saves a deep insert line by line and does not roll back: when it
+ * refuses line 2 or later (line 1 is the record itself), the record and any
+ * earlier lines are saved (live, 23.1), and its answer names no key. Report
+ * that as partly_saved, find the saved record with one read, and point to
+ * add-line, so the record is never created twice.
+ */
+async function partlySaved(
+  s: Session,
+  screen: Resolved,
+  header: Body,
+  lines: Line[],
+  error: AxiError,
+): Promise<AxiError> {
+  const line = error.formLine ?? 2;
+  const keys = screen.type.key.filter((k) =>
+    screen.type.fields.some((f) => f.name === k),
+  );
+  const terms = Object.entries(header).filter(
+    (entry): entry is [string, string | number | boolean] =>
+      ['string', 'number', 'boolean'].includes(typeof entry[1]),
+  );
+  const key = keys.length === 1 ? keys[0] : undefined;
+  const lookup = [
+    `priority-axi get ${screen.name}`,
+    ...terms.map(([f, v]) => `--where ${shellWord(`${f}=${String(v)}`)}`),
+    ...(key ? [`--sort ${key}:desc`] : []),
+    '--limit 3',
+  ].join(' ');
+  let found: string[] = [];
+  if (key && terms.length) {
+    try {
+      const filter = terms
+        .map(([f, v]) => {
+          const field = resolveField(screen.type, screen.name, f);
+          return `${field.name} eq ${literal(field, String(v))}`;
+        })
+        .join(' and ');
+      const answer = await readScreen(
+        s,
+        screen.name,
+        queryString({
+          $filter: filter,
+          $select: key,
+          $orderby: `${key} desc`,
+          $top: 3,
+        }),
+      );
+      found = rowsOf(answer)
+        .map((r) => r[key])
+        .filter(
+          (v): v is string | number =>
+            (typeof v === 'string' && v !== '') || typeof v === 'number',
+        )
+        .map(String);
+    } catch {
+      found = [];
+    }
+  }
+  const subs = [...new Set(lines.map((l) => l.sub.name))];
+  const sub = subs.length === 1 ? subs[0] : '<SUB>';
+  const first = found[0];
+  const where = first
+    ? `The saved record is most likely ${first}, the newest ${screen.name} with these fields${found.length > 1 ? ` (older matches: ${found.slice(1).join(', ')})` : ''}; check it with \`priority-axi show ${screen.name} ${shellWord(first)}${sub === '<SUB>' ? '' : ` --with ${sub}`}\`. Add the corrected lines to it with \`priority-axi add-line ${screen.name} ${shellWord(first)} ${sub} F=V...\`.`
+    : `Find it with \`${lookup}\`, then add the corrected lines to it with \`priority-axi add-line ${screen.name} <key> ${sub} F=V...\`.`;
+  return new AxiError(
+    'partly_saved',
+    `Priority saved the ${screen.name} record, and any lines before line ${line}, but refused line ${line} (line 1 is the record itself). Do not create it again. ${where}`,
+    {
+      screen: screen.name,
+      line,
+      ...(first ? { saved: first } : { find: lookup }),
+      priority: error.message,
+    },
+  );
+}
+
 export async function create(input: CommandInput): Promise<string> {
   const s = open(input);
   const { index } = await screenIndex(s);
@@ -263,6 +348,14 @@ export async function create(input: CommandInput): Promise<string> {
   } catch (error) {
     if (error instanceof AxiError && error.code === 'screen_not_enabled')
       recordReach(s.dir, screen.name, 'no', now);
+    if (
+      error instanceof AxiError &&
+      error.code === 'priority_rejected' &&
+      lines.length > 0 &&
+      (error.formLine ?? 0) >= 2
+    ) {
+      throw await partlySaved(s, screen, body, lines, error);
+    }
     throw error;
   }
   recordReach(s.dir, screen.name, 'yes', now);

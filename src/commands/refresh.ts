@@ -1,7 +1,8 @@
 // Rebuild the screen index now.
 
 import type { CommandInput } from '../cli/table.ts';
-import { loadIndex } from '../index/cache.ts';
+import { timeLeft } from '../http.ts';
+import { LOCK_WAIT_MS, loadIndex } from '../index/cache.ts';
 import { render } from '../output/toon.ts';
 import { checkCompany, indexSource, open, priorityVersion } from './common.ts';
 
@@ -13,6 +14,7 @@ export async function refresh(input: CommandInput): Promise<string> {
     now: input.io.now(),
     refresh: true,
     liveVersion: version,
+    lockWaitMs: Math.min(LOCK_WAIT_MS, timeLeft(s.settings, input.io.http)),
   });
   const types = Object.values(index.types);
   const doc: Record<string, unknown> = {

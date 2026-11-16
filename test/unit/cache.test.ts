@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import type { Settings } from '../../src/config.ts';
@@ -158,5 +158,49 @@ describe('reach and company records', () => {
       readCompany(dir, 'demo', new Date(NOW.getTime() + MAX_INDEX_AGE_MS + 1)),
       undefined,
     );
+  });
+});
+
+describe('the build lock', () => {
+  it('lets concurrent cold runs share one metadata download', async () => {
+    const dir = tempDir();
+    let downloads = 0;
+    const slow = {
+      fetchVersion: async () => '23.1',
+      fetchMetadata: async () => {
+        downloads++;
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return { csdl: FIXTURE, bytes: 1000, ms: 150 };
+      },
+    };
+    const results = await Promise.all(
+      [1, 2, 3].map(() => loadIndex(dir, slow, { now: NOW })),
+    );
+    assert.equal(downloads, 1);
+    assert.equal(results.filter((r) => r.rebuilt).length, 1);
+    for (const r of results) assert.ok(r.index.types.ORDERS);
+    assert.equal(existsSync(join(dir, 'index.lock')), false);
+  });
+
+  it('takes over a lock left by a run that died', async () => {
+    const dir = tempDir();
+    writeFileSync(join(dir, 'index.lock'), '2147483646 2026-11-05T00:00:00Z');
+    const { calls, source: src } = source();
+    const started = Date.now();
+    const r = await loadIndex(dir, src, { now: NOW });
+    assert.ok(r.rebuilt);
+    assert.equal(calls.metadata, 1);
+    assert.ok(Date.now() - started < 1000);
+  });
+
+  it('builds anyway when the wait runs out, and never fails for the lock', async () => {
+    const dir = tempDir();
+    writeFileSync(join(dir, 'index.lock'), `${process.pid} now`);
+    const { calls, source: src } = source();
+    const r = await loadIndex(dir, src, { now: NOW, lockWaitMs: 0 });
+    assert.ok(r.rebuilt);
+    assert.equal(calls.metadata, 1);
+    // Another run's lock is not this run's to remove.
+    assert.equal(existsSync(join(dir, 'index.lock')), true);
   });
 });

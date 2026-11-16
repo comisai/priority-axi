@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Settings } from '../../src/config.ts';
 import { AxiError } from '../../src/errors.ts';
-import { type HttpDeps, rowsOf, send } from '../../src/http.ts';
+import {
+  beforeSending,
+  type HttpDeps,
+  MAX_ANSWER_BYTES,
+  rowsOf,
+  send,
+} from '../../src/http.ts';
 import { VERSION } from '../../src/version.ts';
 import { type Call, fakeFetch, json, type Route } from '../helpers.ts';
 
@@ -149,7 +155,7 @@ describe('send', () => {
     };
     await assert.rejects(
       send(settings, { method: 'GET', path: 'X' }, slow),
-      (e: unknown) => e instanceof AxiError && /within 90 s/.test(e.message),
+      (e: unknown) => e instanceof AxiError && /within 150 s\./.test(e.message),
     );
   });
 
@@ -179,7 +185,10 @@ describe('send', () => {
         deps({ X: broken }),
       ),
       (e: unknown) =>
-        e instanceof AxiError && /may have been saved/.test(e.message),
+        e instanceof AxiError &&
+        /broke off its answer to the create, so Priority may have saved the create\. .*Do not retry\./.test(
+          e.message,
+        ),
     );
   });
 
@@ -251,5 +260,253 @@ describe('rowsOf', () => {
         e.code === 'priority_error' &&
         /incomplete answer \(24 bytes\)/.test(e.message),
     );
+  });
+});
+
+describe('a write that fails after it was sent', () => {
+  const reject = (cause: unknown): HttpDeps => ({
+    fetch: async () => {
+      throw new TypeError('fetch failed', { cause });
+    },
+    sleep: async () => {},
+  });
+  const errno = (code: string) =>
+    Object.assign(new Error(`connect ${code}`), { code });
+
+  it('tells errors that prove nothing was sent from all others', () => {
+    for (const code of [
+      'ECONNREFUSED',
+      'ENOTFOUND',
+      'EAI_AGAIN',
+      'UND_ERR_CONNECT_TIMEOUT',
+      'CERT_HAS_EXPIRED',
+      'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+      'DEPTH_ZERO_SELF_SIGNED_CERT',
+      'ERR_TLS_CERT_ALTNAME_INVALID',
+    ]) {
+      assert.equal(
+        beforeSending(new TypeError('fetch failed', { cause: errno(code) })),
+        true,
+        code,
+      );
+    }
+    // localhost tries ::1 and 127.0.0.1, and both refuse.
+    assert.equal(
+      beforeSending(
+        new TypeError('fetch failed', {
+          cause: Object.assign(
+            new AggregateError([errno('ECONNREFUSED'), errno('ECONNREFUSED')]),
+            { code: 'ECONNREFUSED' },
+          ),
+        }),
+      ),
+      true,
+    );
+    // The Gate or another proxy refused the CONNECT tunnel.
+    assert.equal(
+      beforeSending(
+        new TypeError('fetch failed', {
+          cause: Object.assign(
+            new Error('Proxy response (403) !== 200 when HTTP Tunneling'),
+            { code: 'UND_ERR_ABORTED' },
+          ),
+        }),
+      ),
+      true,
+    );
+    for (const cause of [
+      errno('ECONNRESET'),
+      errno('EPIPE'),
+      Object.assign(new Error('other side closed'), {
+        code: 'UND_ERR_SOCKET',
+      }),
+      new Error('no code'),
+      undefined,
+    ]) {
+      assert.equal(
+        beforeSending(new TypeError('fetch failed', { cause })),
+        false,
+        String((cause as { code?: string } | undefined)?.code),
+      );
+    }
+  });
+
+  it('says a write may have been saved, and not to retry, unless nothing was sent', async () => {
+    for (const [call, what] of [
+      [{ method: 'POST', path: 'ORDERS', body: {} }, 'create'],
+      [{ method: 'PATCH', path: "ORDERS('SO1')", body: {} }, 'update'],
+      [
+        { method: 'POST', path: "ORDERS('SO1')/ORDERITEMS_SUBFORM", body: {} },
+        'new line',
+      ],
+    ] as const) {
+      await assert.rejects(
+        send(settings, call, reject(errno('ECONNRESET'))),
+        (e: unknown) =>
+          e instanceof AxiError &&
+          e.code === 'unreachable' &&
+          e.message.includes(
+            `The connection to Priority broke after the ${what} was sent, so Priority may have saved the ${what}. Check with \`priority-axi show\` or \`priority-axi get\` before sending it again. Do not retry.`,
+          ) &&
+          !/could not be reached|Check the address/.test(e.message),
+      );
+    }
+    await assert.rejects(
+      send(
+        settings,
+        { method: 'POST', path: 'ORDERS', body: {} },
+        reject(errno('ECONNREFUSED')),
+      ),
+      (e: unknown) =>
+        e instanceof AxiError &&
+        e.message ===
+          'Priority could not be reached, so nothing was sent. Check the address, or whether the Gate is running.',
+    );
+    const slow: HttpDeps = {
+      fetch: async () => {
+        throw new DOMException('timed out', 'TimeoutError');
+      },
+      sleep: async () => {},
+    };
+    await assert.rejects(
+      send(settings, { method: 'PATCH', path: "X('1')", body: {} }, slow),
+      (e: unknown) =>
+        e instanceof AxiError &&
+        /^Priority did not answer within 120 s after the update was sent, so Priority may have saved the update\. .*Do not retry\.$/.test(
+          e.message,
+        ),
+    );
+  });
+
+  it('adds the same warning to a server failure answered to a write', async () => {
+    for (const status of [500, 502, 504]) {
+      await assert.rejects(
+        send(
+          settings,
+          { method: 'POST', path: 'ORDERS', body: {} },
+          deps({ ORDERS: () => json(status) }),
+        ),
+        (e: unknown) =>
+          e instanceof AxiError &&
+          e.code === 'priority_error' &&
+          new RegExp(
+            `^Priority answered ${status} with no message\\. Priority may have saved the create anyway\\. .*Do not retry\\.$`,
+          ).test(e.message),
+      );
+    }
+    // A read is not a write: no warning.
+    await assert.rejects(
+      send(
+        settings,
+        { method: 'GET', path: 'X' },
+        deps({ X: () => json(500) }),
+      ),
+      (e: unknown) =>
+        e instanceof AxiError && !/may have saved/.test(e.message),
+    );
+  });
+});
+
+describe('answer size', () => {
+  it('stops reading an answer over the cap and reports output_too_large', async () => {
+    const chunk = new Uint8Array(2 ** 20).fill(32);
+    let pulled = 0;
+    const huge = () =>
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            pulled++;
+            controller.enqueue(chunk);
+          },
+        }),
+        { status: 200 },
+      );
+    await assert.rejects(
+      send(settings, { method: 'GET', path: 'X' }, deps({ X: huge })),
+      (e: unknown) =>
+        e instanceof AxiError &&
+        e.code === 'output_too_large' &&
+        /over 32 MB/.test(e.message) &&
+        e.fields.limit === MAX_ANSWER_BYTES,
+    );
+    assert.ok(pulled <= 40, String(pulled));
+  });
+});
+
+describe('COMIS_DEADLINE', () => {
+  const now = 1_800_000_000_000;
+  const at = (ms: number) => ({ ...settings, deadline: now + ms });
+  const clock = (d: HttpDeps): HttpDeps => ({ ...d, now: () => now });
+
+  it('bounds a read by the time left, less a second', async () => {
+    let signal: AbortSignal | undefined;
+    const d = clock({
+      fetch: async (_u, init) => {
+        signal = init?.signal ?? undefined;
+        throw new DOMException('timed out', 'TimeoutError');
+      },
+      sleep: async () => {},
+    });
+    await assert.rejects(
+      send(at(20_000), { method: 'GET', path: 'X' }, d),
+      (e: unknown) =>
+        e instanceof AxiError &&
+        e.code === 'unreachable' &&
+        /^Priority did not answer within the 19 s left before this command's deadline\. Run it from a worker/.test(
+          e.message,
+        ),
+    );
+    assert.ok(signal);
+  });
+
+  it('refuses a read when no time is left, before asking Priority', async () => {
+    const calls: Call[] = [];
+    await assert.rejects(
+      send(
+        at(900),
+        { method: 'GET', path: 'X' },
+        clock(deps({ X: () => json(200, { value: [] }) }, calls)),
+      ),
+      (e: unknown) =>
+        e instanceof AxiError &&
+        /ran out before Priority was asked/.test(e.message),
+    );
+    assert.equal(calls.length, 0);
+  });
+
+  it('refuses a write with less than 50 s left, without sending it', async () => {
+    const calls: Call[] = [];
+    const d = clock(deps({ ORDERS: () => json(201, {}) }, calls));
+    await assert.rejects(
+      send(at(49_000), { method: 'POST', path: 'ORDERS', body: {} }, d),
+      (e: unknown) =>
+        e instanceof AxiError &&
+        e.code === 'unreachable' &&
+        /^Only 49 s are left before this command's deadline \(COMIS_DEADLINE\): not enough time for the owner's approval hold, so nothing was sent\. Run it in a worker/.test(
+          e.message,
+        ),
+    );
+    assert.equal(calls.length, 0);
+    await send(at(60_000), { method: 'POST', path: 'ORDERS', body: {} }, d);
+    assert.equal(calls.length, 1);
+  });
+
+  it('does not wait out a Retry-After that passes the deadline', async () => {
+    const sleeps: number[] = [];
+    await assert.rejects(
+      send(
+        at(3_000),
+        { method: 'GET', path: 'X' },
+        clock(
+          deps(
+            { X: () => json(429, undefined, { 'Retry-After': '5' }) },
+            [],
+            sleeps,
+          ),
+        ),
+      ),
+      code('rate_limited'),
+    );
+    assert.deepEqual(sleeps, []);
   });
 });
