@@ -43,8 +43,8 @@ npm run test:dist   # contract and AXI-principle tests against the built CLI
 
 priority-axi is used by AI agents, so its output is part of its interface. Keep to these rules; `test/axi/principles.test.ts` checks most of them:
 
-- **Output:** results go to stdout as TOON, starting with a summary line. Output stays within the size limits unless `--full` is given.
-- **Hints:** each hint is one line that starts with ``Run `priority-axi …` ``.
+- **Output:** results go to stdout as one TOON document, or one JSON document with `--json`, starting with a summary field. Output stays within the size limits unless `--full` is given.
+- **Hints:** hints are strings in the document’s `help` array; each starts with ``Run `priority-axi …` ``.
 - **Errors:** an error prints `message`, `code` and `usage` on stdout. The exit code is 1 for an error and 2 for a usage error. Reuse an existing code before adding a new one.
 - **Writes:** a write is sent once and never retried. Every field is checked against the metadata before sending.
 - **Secrets:** a password never appears in output, errors or logs.

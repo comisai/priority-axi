@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { decode } from '@toon-format/toon';
 import { parseCommand } from '../../src/cli/parse.ts';
 import { main } from '../../src/cli/run.ts';
 import { type CommandSpec, usageLine } from '../../src/cli/table.ts';
@@ -141,10 +142,9 @@ describe('main', () => {
     const h = makeIo();
     assert.equal(await main(['--help'], h.io), 0);
     assert.match(h.output(), /commands\[13\]\{command,summary\}:/);
-    assert.match(
-      h.output(),
-      /help\[1\]:\n {2}Run `priority-axi help <command>` for its flags\n$/,
-    );
+    assert.deepEqual((decode(h.output()) as Record<string, unknown>).help, [
+      'Run `priority-axi help <command>` for its flags',
+    ]);
     assert.equal(h.calls.length, 0, 'help never calls Priority');
   });
 
@@ -196,10 +196,10 @@ describe('main', () => {
     assert.match(out, /\nlogin: user_a\n/);
     assert.match(out, /index: not built yet/);
     assert.match(out, /screens_read: none yet/);
-    assert.match(
-      out,
-      /help\[2\]:\n {2}Run `priority-axi screens <text>` to find a screen\n {2}Run `priority-axi get <SCREEN> --limit 5` to read records\n$/,
-    );
+    assert.deepEqual((decode(out) as Record<string, unknown>).help, [
+      'Run `priority-axi screens <text>` to find a screen',
+      'Run `priority-axi get <SCREEN> --limit 5` to read records',
+    ]);
     assert.ok(out.length <= OUTPUT_LIMIT);
     assert.ok(!out.includes(PASSWORD));
     assert.deepEqual(

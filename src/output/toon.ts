@@ -1,6 +1,7 @@
 // TOON output on stdout, from the official encoder pinned exactly, with the
 // AXI help footer and the size bounds Comis uses (D240, D380).
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { encode } from '@toon-format/toon';
 import { AxiError, type ErrorFields } from '../errors.ts';
 import { visible } from './text.ts';
@@ -14,15 +15,22 @@ export const FULL_LIMIT = 262144;
 
 export type Doc = Record<string, unknown>;
 
-/** The indented help footer that follows the encoded body as AXI text. */
-export function helpBlock(lines: readonly string[]): string {
-  if (!lines.length) return '';
-  return `help[${lines.length}]:\n${lines.map((l) => `  ${l}\n`).join('')}`;
+// Scope the format to one CLI invocation, including bounded builders and errors.
+const jsonOutput = new AsyncLocalStorage<boolean>();
+export function withOutputFormat<T>(json: boolean, run: () => T): T {
+  return jsonOutput.run(json, run);
 }
 
-/** Encode a document (made visible first) and append help lines. */
+/** A help array encoded by the official encoder. */
+export function helpBlock(lines: readonly string[]): string {
+  if (!lines.length) return '';
+  return `${encode(visible({ help: lines }) as Parameters<typeof encode>[0])}\n`;
+}
+
+/** Encode the whole visible document, including its optional help array. */
 export function render(doc: Doc, help: readonly string[] = []): string {
-  return `${encode(visible(doc) as Parameters<typeof encode>[0])}\n${helpBlock(help)}`;
+  const document = visible({ ...doc, ...(help.length ? { help } : {}) });
+  return `${jsonOutput.getStore() ? JSON.stringify(document) : encode(document as Parameters<typeof encode>[0])}\n`;
 }
 
 /** Cut text to `limit` code points with the standard marker naming its size. */

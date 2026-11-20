@@ -25,18 +25,13 @@ before(async () => {
 });
 after(() => fake.close());
 
-/** The encoded TOON body, without the AXI help footer. */
+/** Decode all stdout, including the help array. */
 function body(text: string): Record<string, unknown> {
-  const [encoded = ''] = text.split(/^help\[\d+\]:\n/m);
-  return decode(encoded) as Record<string, unknown>;
+  return decode(text) as Record<string, unknown>;
 }
 
 function helpLines(text: string): string[] {
-  const m = /^help\[(\d+)\]:\n((?: {2}.*\n)*)$/m.exec(text);
-  if (!m) return [];
-  const lines = (m[2] ?? '').split('\n').filter(Boolean);
-  assert.equal(lines.length, Number(m[1]), 'help[n] counts its lines');
-  return lines;
+  return (body(text).help ?? []) as string[];
 }
 
 const LISTS: string[][] = [
@@ -153,7 +148,7 @@ describe('AXI principles', () => {
         `${args.join(' ')}: ${lines.length}`,
       );
       for (const line of lines)
-        assert.match(line, /^ {2}Run `priority-axi [a-z<][^`]*`/, line);
+        assert.match(line, /^Run `priority-axi [a-z<][^`]*`/, line);
     }
     for (const args of DETAILS) {
       assert.deepEqual(

@@ -1,7 +1,7 @@
 // Dispatch: home view with no command, help and version, then one command.
 // Everything goes to stdout. Exit codes: 0 ok, 1 error, 2 usage.
 
-import { encode } from '@toon-format/toon';
+import { parseArgs } from 'node:util';
 import { fields, screens } from '../commands/catalog.ts';
 import { create } from '../commands/create.ts';
 import { find as findRecords } from '../commands/find.ts';
@@ -10,7 +10,7 @@ import { changes, get, show } from '../commands/read.ts';
 import { refresh } from '../commands/refresh.ts';
 import { addLine, update, updateLine } from '../commands/update.ts';
 import { AxiError, usage } from '../errors.ts';
-import { errorText } from '../output/toon.ts';
+import { errorText, render, withOutputFormat } from '../output/toon.ts';
 import { VERSION } from '../version.ts';
 import { parseCommand } from './parse.ts';
 import {
@@ -18,6 +18,7 @@ import {
   CONNECTION_FLAGS,
   type CommandSpec,
   commandName,
+  type FlagSpec,
   type Io,
   usageLine,
 } from './table.ts';
@@ -25,7 +26,12 @@ import {
 export const DESCRIPTION =
   'Read, create and update Priority ERP records over its REST API';
 
-export const COMMANDS: readonly CommandSpec[] = [
+const JSON_FLAG: FlagSpec = {
+  type: 'boolean',
+  summary: 'Print only a JSON document, including help and errors',
+};
+
+const COMMAND_SPECS: readonly CommandSpec[] = [
   {
     name: '',
     args: [],
@@ -101,7 +107,11 @@ export const COMMANDS: readonly CommandSpec[] = [
         value: '<n>',
         summary: 'Records per page, default 20, at most 500',
       },
-      page: { type: 'string', value: '<n>', summary: 'Page number, default 1' },
+      page: {
+        type: 'string',
+        value: '<n>',
+        summary: 'Page number, default 1',
+      },
       offset: {
         type: 'string',
         value: '<n>',
@@ -136,7 +146,10 @@ export const COMMANDS: readonly CommandSpec[] = [
         summary: 'Include sub-screen lines',
       },
       all: { type: 'boolean', summary: 'Include internal IDs' },
-      full: { type: 'boolean', summary: 'Every field and line, no size limit' },
+      full: {
+        type: 'boolean',
+        summary: 'Every field and line, no size limit',
+      },
       ...CONNECTION_FLAGS,
     },
     summary: 'Read one record by its key',
@@ -165,7 +178,11 @@ export const COMMANDS: readonly CommandSpec[] = [
         value: '<n>',
         summary: 'Records per page, default 20, at most 500',
       },
-      page: { type: 'string', value: '<n>', summary: 'Page number, default 1' },
+      page: {
+        type: 'string',
+        value: '<n>',
+        summary: 'Page number, default 1',
+      },
       offset: {
         type: 'string',
         value: '<n>',
@@ -200,7 +217,11 @@ export const COMMANDS: readonly CommandSpec[] = [
         value: '<n>',
         summary: 'Matches per page, default 20, at most 200',
       },
-      page: { type: 'string', value: '<n>', summary: 'Page number, default 1' },
+      page: {
+        type: 'string',
+        value: '<n>',
+        summary: 'Page number, default 1',
+      },
       refresh: {
         type: 'boolean',
         summary: 'Rebuild the local catalog now instead of after a day',
@@ -330,21 +351,30 @@ export const COMMANDS: readonly CommandSpec[] = [
   },
 ];
 
+export const COMMANDS: readonly CommandSpec[] = COMMAND_SPECS.map((spec) => ({
+  ...spec,
+  flags: { ...spec.flags, json: JSON_FLAG },
+}));
+
 const HOME = COMMANDS[0] as CommandSpec;
 const HELP_FLAGS = new Set(['--help', '-h']);
 const VERSION_FLAGS = new Set(['--version', '-v', '-V']);
 
 export function topHelp(): string {
-  return `${encode({
-    description: DESCRIPTION,
-    usage: `${BIN} [command] [flags]`,
-    commands: COMMANDS.map((c) => ({
-      command: commandName(c),
-      summary: c.summary,
-    })),
-    settings:
-      'PRIORITY_URL and PRIORITY_PASSWORD; PRIORITY_USER, PRIORITY_COMPANY and PRIORITY_INI, or their flags',
-  })}\nhelp[1]:\n  Run \`${BIN} help <command>\` for its flags\n`;
+  return render(
+    {
+      description: DESCRIPTION,
+      usage: `${BIN} [command] [flags]`,
+      commands: COMMANDS.map((c) => ({
+        command: commandName(c),
+        summary: c.summary,
+      })),
+      settings:
+        'PRIORITY_URL and PRIORITY_PASSWORD; PRIORITY_USER, PRIORITY_COMPANY and PRIORITY_INI, or their flags',
+      flags: [{ flag: '--json', summary: JSON_FLAG.summary }],
+    },
+    [`Run \`${BIN} help <command>\` for its flags`],
+  );
 }
 
 export function commandHelp(spec: CommandSpec): string {
@@ -353,12 +383,12 @@ export function commandHelp(spec: CommandSpec): string {
       f.type === 'string' ? `--${name} ${f.value ?? '<value>'}` : `--${name}`,
     summary: f.multiple ? `${f.summary} (repeatable)` : f.summary,
   }));
-  return `${encode({
+  return render({
     command: commandName(spec),
     summary: spec.summary,
     usage: usageLine(spec),
     ...(flags.length ? { flags } : {}),
-  })}\n`;
+  });
 }
 
 function find(name: string): CommandSpec | undefined {
@@ -373,13 +403,58 @@ function unknownCommand(name: string): AxiError {
   return usage(`Unknown command ${shown}. Commands: ${list.join(', ')}.`);
 }
 
-export async function main(argv: string[], io: Io): Promise<number> {
+/** Identify the global format flag without mistaking a flag value or -- data for it. */
+export function main(argv: string[], io: Io): Promise<number> {
+  const options = Object.fromEntries(
+    COMMANDS.flatMap((spec) =>
+      Object.entries(spec.flags).map(([name, flag]) => [
+        name,
+        { type: flag.type, multiple: true },
+      ]),
+    ),
+  );
+  const parsed = parseArgs({
+    args: argv,
+    options,
+    strict: false,
+    allowPositionals: true,
+    tokens: true,
+  });
+  const formatTokens = parsed.tokens.filter(
+    (token) => token.kind === 'option' && token.name === 'json',
+  );
+  const indices = new Set(formatTokens.map((token) => token.index));
+  const json = formatTokens.length > 0;
+  const formatError = formatTokens.some(
+    (token) => token.kind === 'option' && token.inlineValue,
+  )
+    ? '--json takes no value.'
+    : formatTokens.length > 1
+      ? '--json is given more than once.'
+      : undefined;
+  return withOutputFormat(json, () =>
+    dispatch(
+      argv.filter((_, index) => !indices.has(index)),
+      io,
+      json,
+      formatError,
+    ),
+  );
+}
+
+async function dispatch(
+  argv: string[],
+  io: Io,
+  json: boolean,
+  formatError?: string,
+): Promise<number> {
   let spec: CommandSpec = HOME;
   let usageText = `${BIN} [command] [flags]`;
   try {
+    if (formatError) throw usage(formatError);
     const first = argv[0];
     if (argv.length === 1 && first && VERSION_FLAGS.has(first)) {
-      io.stdout(`${VERSION}\n`);
+      io.stdout(json ? render({ version: VERSION }) : `${VERSION}\n`);
       return 0;
     }
     if (argv.length === 1 && first && HELP_FLAGS.has(first)) {
