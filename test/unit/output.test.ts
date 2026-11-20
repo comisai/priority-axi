@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { decode } from '@toon-format/toon';
 import { AxiError } from '../../src/errors.ts';
 import { buildIndex } from '../../src/index/build.ts';
 import { isTextForm, plainText } from '../../src/output/html.ts';
@@ -18,6 +19,7 @@ import {
   helpBlock,
   OUTPUT_LIMIT,
   render,
+  withOutputFormat,
 } from '../../src/output/toon.ts';
 import { FIXTURE } from '../helpers.ts';
 
@@ -77,12 +79,54 @@ describe('visible text', () => {
 });
 
 describe('TOON rendering', () => {
-  it('appends the help footer as AXI text', () => {
+  it('decodes the report dry-run reproduction as one document', () => {
+    const doc = {
+      dry_run: true,
+      request: 'PATCH /example',
+      body: { ORDSTATUSDES: 'cancelled' },
+      transactions: 1,
+    };
+    const help = ['Run the printed command after approval'];
+    assert.deepEqual(decode(render(doc, help)), { ...doc, help });
+  });
+  it('encodes the help array within the document', () => {
     assert.equal(helpBlock([]), '');
     assert.equal(
       render({ summary: '0 records' }, ['Run `priority-axi refresh`']),
-      'summary: 0 records\nhelp[1]:\n  Run `priority-axi refresh`\n',
+      'summary: 0 records\nhelp[1]: Run `priority-axi refresh`\n',
     );
+  });
+
+  it('quotes and makes hints visible just like the rest of the document', () => {
+    const help = [
+      'Run `priority-axi get X` with a,b: "c"',
+      'line one\nline two',
+      `a${cp(0x202e)}b`,
+    ];
+    const doc = { summary: 'test', nested: { value: 'true' } };
+    const expected = visible({ ...doc, help });
+    assert.deepEqual(decode(render(doc, help)), expected);
+    assert.deepEqual(
+      JSON.parse(withOutputFormat(true, () => render(doc, help))),
+      expected,
+    );
+  });
+
+  it('keeps concurrent output formats independent', async () => {
+    const doc = { summary: 'test' };
+    const [json, toon] = await Promise.all([
+      withOutputFormat(true, async () => {
+        await Promise.resolve();
+        return render(doc);
+      }),
+      withOutputFormat(false, async () => {
+        await Promise.resolve();
+        return render(doc);
+      }),
+    ]);
+    assert.deepEqual(JSON.parse(json), doc);
+    assert.deepEqual(decode(toon), doc);
+    assert.equal(render(doc), toon);
   });
 
   it('renders rows as a TOON table', () => {

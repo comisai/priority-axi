@@ -8,7 +8,7 @@ A command-line tool that lets AI agents read, create and update records in Prior
 
 priority-axi is an AXI, an agent experience interface. Every command:
 
-- prints compact [TOON](https://github.com/toon-format/toon) text on stdout, bounded in size;
+- prints compact [TOON](https://github.com/toon-format/toon) or JSON on stdout, bounded in size;
 - checks its input against the server's own metadata, and says exactly what is wrong;
 - ends with hints for the next command;
 - sends a write once and never retries it.
@@ -69,6 +69,15 @@ priority-axi refresh                         rebuild the screen index
 priority-axi help [<command>]                every flag of a command
 ```
 
+Every command takes `--json` to print only one JSON document on stdout. This includes the home view, help, version and errors; exit codes stay the same. Put it before the command or among its flags. Without it, stdout is one TOON document. Next-step hints are a `help` array inside either document, so the official TOON decoder can read the whole stdout without stripping a footer. The usual size limits and `--full` apply in both formats.
+
+```sh
+priority-axi update ORDERS SO26000101 --set ORDSTATUSDES=cancelled --dry-run --json
+priority-axi get ORDERS --json
+priority-axi --json help update
+priority-axi --version --json
+```
+
 Every command that talks to Priority also takes `--company`, `--user` and `--ini`.
 
 ```console
@@ -84,9 +93,7 @@ records[2]:
       2,P-101,Part 101,2
   - ORDNAME: SO26000105
     ...
-help[2]:
-  Run `priority-axi get ORDERS --where CUSTNAME=C1002 --with ORDERITEMS --limit 2 --page 2` for the next 2
-  Run `priority-axi show ORDERS <ORDNAME>` for one record
+help[2]: Run `priority-axi get ORDERS --where CUSTNAME=C1002 --with ORDERITEMS --limit 2 --page 2` for the next 2,Run `priority-axi show ORDERS <ORDNAME>` for one record
 
 $ priority-axi get ORDERS --where NOSUCH=1
 message: ORDERS has no field NOSUCH. Run `priority-axi fields ORDERS` to list them.

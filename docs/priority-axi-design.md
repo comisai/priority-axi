@@ -189,7 +189,7 @@ If the owner takes longer than the 45 s hold, the Gate answers 409 with `Comis-A
 
 ## 7. Command surface
 
-The design copies `gh-axi`'s conventions. Running it with no arguments shows a home view. Each subcommand has a short `--help`. Output is TOON. Errors go to stdout with exit code 1, and usage errors exit 2.
+The design copies `gh-axi`'s conventions. Running it with no arguments shows a home view. Each subcommand has a short `--help`. Output is one TOON document, or one JSON document with `--json`, including the optional `help` array. Errors go to stdout with exit code 1, and usage errors exit 2.
 
 ```text
 priority-axi                                   home view
@@ -203,7 +203,7 @@ priority-axi create <SCREEN> (--set F=V… [--line <SUB> F=V…]… | --json-fil
 priority-axi update <SCREEN> <key> --set F=V… [--dry-run]       (phase 3, needs C4)
 priority-axi refresh                           rebuild the screen index now
 
-Global: --company <code> --user <name> --ini <file> --help --version
+Global: --company <code> --user <name> --ini <file> --json --help --version
 ```
 
 ### 7.1 Home view
@@ -218,9 +218,9 @@ login: user_a
 index: 1329 screens, built 2026-11-05
 api_screens[0]: none reached yet
 help[3]:
-  Run `priority-axi screens order` to find a screen
-  Run `priority-axi get <SCREEN> --limit 5` to read records
-  "API cannot be run for this screen" means the screen is not in Limited Access/API Forms; ask the owner to have the Priority administrator add it
+  - Run `priority-axi screens order` to find a screen
+  - Run `priority-axi get <SCREEN> --limit 5` to read records
+  - API cannot be run for this screen means the screen is not in Limited Access/API Forms; ask the owner to have the Priority administrator add it
 ```
 
 When nothing is connected, it says so explicitly:
@@ -239,8 +239,8 @@ screens[20 of 36]{name,key,fields,subforms,api}:
   PORDERS,ORDNAME,86,22,unknown
   …
 help[2]:
-  Run `priority-axi screens order --full` to list all 36
-  Run `priority-axi fields ORDERS` to see a screen's fields
+  - Run `priority-axi screens order --full` to list all 36
+  - Run `priority-axi fields ORDERS` to see a screen's fields
 ```
 
 The `api` column records the last result the AXI saw for that screen: `yes`, `no` or `unknown`. A screen is never probed just to fill it in.
@@ -258,7 +258,7 @@ fields[20 of 111]{name,type,flags,description}:
   …
 subforms[30]: ORDERITEMS,DOCTODOLIST,SHIPTO2,…
 help[1]:
-  Run `priority-axi fields ORDERS --all` for all 111, internal IDs such as ORD included
+  - Run `priority-axi fields ORDERS --all` for all 111, internal IDs such as ORD included
 ```
 
 ### 7.3 Reading records
@@ -269,7 +269,7 @@ records[5, more exist]{ORDNAME,CUSTNAME,CDES,CURDATE,ORDSTATUSDES}:
   SO26000120,C1001,Example Ltd,2026-10-03,Open
   …
 help[1]:
-  Run the same command with --page 2 for the next 5
+  - Run the same command with --page 2 for the next 5
 ```
 
 - `--where` takes `F=V`, `F!=V`, `F>V`, `F>=V`, `F<V` and `F<=V`. `F~V` (contains) is refused because Priority answers 501 to `contains` (Q3); a range does the work of a prefix search.
@@ -291,7 +291,7 @@ body:
     P-100,5
 transactions: 2
 help[1]:
-  Run the same command without --dry-run; inside Comis the owner approves it first
+  - Run the same command without --dry-run; inside Comis the owner approves it first
 ```
 
 The same command without `--dry-run`:
