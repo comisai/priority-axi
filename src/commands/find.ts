@@ -21,7 +21,13 @@ import {
   writeCatalog,
 } from '../index/catalog.ts';
 import { bounded, cut, render } from '../output/toon.ts';
-import { haystack, missing, queryTerms, rank } from '../search.ts';
+import {
+  haystack,
+  ignoredWords,
+  missing,
+  queryTerms,
+  rank,
+} from '../search.ts';
 import {
   builtNote,
   commandLine,
@@ -46,6 +52,7 @@ export async function find(input: CommandInput): Promise<string> {
   const v = input.values;
   const words = input.positionals.slice(1);
   const terms = queryTerms(words);
+  const ignored = ignoredWords(words);
   if (!terms.length) {
     throw usage(
       'find needs words to look for, such as `priority-axi find LOGPART צינור 110`. One-letter words are ignored.',
@@ -143,6 +150,11 @@ export async function find(input: CommandInput): Promise<string> {
     summary,
     ...builtNote(loaded),
     catalog: catalogNote,
+    ...(ignored.length
+      ? {
+          ignored: `not searched, so no record was checked for them: ${ignored.join(' ')} (one-letter words and lone marks are left out)`,
+        }
+      : {}),
     ...(retired ? { not_in_use: notInUse(retired) } : {}),
     ...(closest
       ? {

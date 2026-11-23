@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { haystack, normalize, queryTerms, rank } from '../../src/search.ts';
+import {
+  haystack,
+  ignoredWords,
+  normalize,
+  queryTerms,
+  rank,
+} from '../../src/search.ts';
 
 const KAMATZ = String.fromCodePoint(0x05b8);
 const GERSHAYIM = String.fromCodePoint(0x05f4);
@@ -35,6 +41,43 @@ describe('queryTerms', () => {
         ['1.1/2', true],
       ],
     );
+  });
+});
+
+describe('Hebrew abbreviations', () => {
+  it('keep a quote between Hebrew letters as one word, written either way', () => {
+    for (const written of ['ש"ק', `ש${GERSHAYIM}ק`, "ש''ק"])
+      assert.deepEqual(
+        queryTerms([written]).map((t) => [t.text, t.shown]),
+        [['ש"ק', written.normalize('NFKC')]],
+        written,
+      );
+    assert.deepEqual(
+      queryTerms(['בע"מ', 'צה"ל']).map((t) => t.text),
+      ['בע"מ', 'צה"ל'],
+    );
+    const t = (s: string, q: string) =>
+      rank([s], (r) => haystack([r]), queryTerms([q])).all.length === 1;
+    assert.ok(t('לקוח 1 בע"מ', 'בע"מ'));
+    assert.ok(t(`לקוח 1 בע${GERSHAYIM}מ`, 'בע"מ'), 'gershayim in the record');
+    assert.ok(!t('לקוח 1 בע"מ', 'ש"ק'), 'no longer an empty query');
+    assert.ok(!t('בעלים', 'בע"מ'), 'not only its first letters');
+  });
+
+  it('leave a quote after a digit or a Latin letter between words', () => {
+    assert.deepEqual(
+      queryTerms(['4"pvc', "o'brien"]).map((t) => t.text),
+      ['4', 'pvc', 'brien'],
+    );
+    assert.ok(
+      rank(['צינור 4"pvc'], (r) => haystack([r]), queryTerms(['pvc'])).all
+        .length,
+    );
+  });
+
+  it('name the query words that give no term', () => {
+    assert.deepEqual(ignoredWords(['לקוח 1 ב', '"', 'ש"ק']), ['ב', '"']);
+    assert.deepEqual(ignoredWords(['צינור', '4']), []);
   });
 });
 

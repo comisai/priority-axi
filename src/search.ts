@@ -23,10 +23,17 @@ const SINGLE_QUOTES = /[\u05F3\u2018\u2019`]/g;
  * A number standing on its own: 4, 110, 1.5, 1/2, 1.1/2, or 110 in 110*200.
  * Digits joined to letters, such as the 4 in SN4, are part of a word instead.
  */
-const NUMBER = /(?<![\p{L}\d.\/])\d+(?:[./]\d+)*(?![\p{L}\d])/gu;
+const NUMBER = /(?<![\p{L}\d./])\d+(?:[./]\d+)*(?![\p{L}\d])/gu;
 const IS_NUMBER = /^\d+(?:[./]\d+)*$/;
-/** Words: runs of letters and digits, with the number punctuation inside them. */
-const TERM = /[\p{L}\p{N}]+(?:[./][\p{N}]+)*/gu;
+/**
+ * Words: runs of letters and digits, with the number punctuation inside them,
+ * and with a quote mark between Hebrew letters, as in the abbreviations בע"מ
+ * and ש"ק, so an abbreviation is one word, not one-letter pieces left out.
+ * A quote after a digit or a Latin letter still ends the word: 4"pvc is the
+ * number 4 and the word pvc.
+ */
+const TERM =
+  /[\p{L}\p{N}]+(?:[./][\p{N}]+|(?<=\p{Script=Hebrew})["'\u05F3\u05F4\u2018\u2019\u201C\u201D\u201E`]{1,2}\p{Script=Hebrew}+)*/gu;
 
 export function normalize(text: string): string {
   return text
@@ -68,6 +75,16 @@ export function queryTerms(words: readonly string[]): Term[] {
     });
   }
   return out;
+}
+
+/**
+ * The query words that give no term, such as a one-letter word or a lone
+ * mark, as written: `find` searches without them and says so.
+ */
+export function ignoredWords(words: readonly string[]): string[] {
+  return words
+    .flatMap((word) => word.split(/\s+/))
+    .filter((word) => word && !queryTerms([word]).length);
 }
 
 /** A searchable text: the normalized string and its whole numbers. */
