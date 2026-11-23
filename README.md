@@ -131,6 +131,8 @@ Priority cannot search inside text, so `find` keeps a local copy of a screen's c
 - **Every word must appear.** A word matches the start of a word, after Hebrew prefix letters, so `ביוב` finds `לביוב`.
 - **Numbers match only as whole numbers.** `4` matches neither `4000` nor `SN4`.
 - **Spelling variants are ignored:** Hebrew points, final letter forms, and `״`/`׳` against `"`/`'`.
+- **An abbreviation is one word.** A quote between Hebrew letters, as in `בע"מ`, keeps them together, so a record must hold the whole abbreviation.
+- **One-letter words are not searched.** The answer names them, and any lone mark, in `ignored`, so a match never looks complete without them.
 
 Records that are not in use are left out unless you pass `--all`. When no record has every word, the closest ones are listed with the words they lack. `--sub` searches sub-screen lines together with their parent, for example `find CUSTOMERS --sub CUSTPROJECTS`.
 

@@ -94,6 +94,46 @@ describe('find', () => {
     assert.match(r.out, /with fewer or different words/);
   });
 
+  it('keeps a quoted Hebrew abbreviation as one word, so a record lacking it is only a close match that names it', async () => {
+    // A made-up abbreviation and the generic word every test customer holds:
+    // the abbreviation used to split into one-letter pieces that were left
+    // out, and each customer was listed as matching every word.
+    const r = await run(['find', 'CUSTOMERS', 'ש"ק', 'לקוח']);
+    assert.equal(r.code, 0, r.out);
+    assert.match(
+      r.out,
+      /^summary: "0 records from CUSTOMERS match all of: ש\\"ק לקוח"\n/,
+    );
+    assert.match(r.out, /\nclosest: \d+ records? match 1 of 2 words\n/);
+    assert.match(r.out, /,lacking\}:/);
+    assert.match(r.out, /,"ש\\"ק"\n/);
+    // The same abbreviation written with gershayim, and one the records hold.
+    const marked = await run(['find', 'CUSTOMERS', `ש${GERSHAYIM}ק`, 'לקוח']);
+    assert.match(marked.out, /\nclosest: /);
+    const held = await run([
+      'find',
+      'CUSTOMERS',
+      `בע${GERSHAYIM}מ`,
+      'לקוח',
+      '1',
+    ]);
+    assert.match(
+      held.out,
+      /^summary: 1 record from CUSTOMERS match בע״מ לקוח 1\n/,
+    );
+  });
+
+  it('names the words it did not search, such as a one-letter word', async () => {
+    const r = await run(['find', 'CUSTOMERS', 'לקוח 1 ב', '"']);
+    assert.equal(r.code, 0, r.out);
+    assert.match(
+      r.out,
+      /\nignored: "not searched, so no record was checked for them: ב \\" \(one-letter words and lone marks are left out\)"\n/,
+    );
+    const plain = await run(['find', 'CUSTOMERS', 'לקוח', '1']);
+    assert.doesNotMatch(plain.out, /ignored/);
+  });
+
   it('leaves out inactive records unless --all, which adds the status', async () => {
     const r = await run(['find', 'LOGPART', 'צבוע', 'לבן']);
     assert.match(r.out, /^summary: 1 record from LOGPART match צבוע לבן\n/);
